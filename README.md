@@ -1,2 +1,2 @@
-# UoA
-UoA notes, assignments, prohects repo
+# UoACancel changes
+UoA notes, assignments, projects repo
