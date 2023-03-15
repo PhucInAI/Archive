@@ -127,3 +127,11 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# Data folder
+**data**
+
+#-------------------------------------------------------------------------
+# Exclude the clone Github repos if don't change any line of code
+#-------------------------------------------------------------------------
+Module10_CV2/Unet/semantic-segmentation-tf2**
