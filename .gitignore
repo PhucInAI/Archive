@@ -127,3 +127,12 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# Data 
+**data**
+*.mp4
+*.avi
+
+# weights
+**weight**
+**pretrained**
