@@ -16,6 +16,7 @@ import matplotlib.pyplot as plt
 
 from FFESNet.utils.dataset import PolypDataset, TestDataset
 from FFESNet.utils.losses.structure_loss import structure_loss
+from FFESNet.models.FFESNet import FFESNet
 
 
 def parse_args():
@@ -53,7 +54,7 @@ def load_model(model_arch, model_type, drop_rate):
     elif model_arch == 'FFESNet_PAN_AttentionAggregation':
         from FFESNet.models.FFESNet_PAN_AttentionAggregation import FFESNet
     elif model_arch == 'FFESNet_LE_PAN_AttentionAggregation':
-        from FFESNet.models.FFESNet_LE_PAN_AttentionAggregation import FFESNet
+        from FFESNet.models.FFESNet import FFESNet
 
     model = FFESNet(model_type=model_type, dropout=drop_rate)
     

@@ -8,13 +8,15 @@ from torch import nn
 from mmcv.cnn import ConvModule
 
 import FFESNet.models.mit as mit
-from FFESNet.models.pyramids.bifpn import BiFPN
+from FFESNet.models.pyramids.le import LocalEnhanceModule
+from FFESNet.models.pyramids.pan import PAN
+from FFESNet.models.pyramids.a2fpn import AttentionAggregationModule
 
 class FFESNet(nn.Module):
     """
     FFESNet with BiFPN
     """
-    def __init__(self, model_type = 'B0', dropout = 0.1, embedding_dim = 160):
+    def __init__(self, model_type = 'B0', dropout = 0.2, embedding_dim = 160, use_le=False, pred_type = 'linear'):
         """
         Init function
         """
@@ -39,18 +41,33 @@ class FFESNet(nn.Module):
         
         self._init_weights()  # load pretrain
         
-
+        # ----------------------------------------------------------------
+        # Local Enhance
+        # ----------------------------------------------------------------
+        self.use_le = use_le
+        self.le1 = LocalEnhanceModule(in_channels=self.backbone.embed_dims[0], out_channels=self.backbone.embed_dims[0])
+        self.le2 = LocalEnhanceModule(in_channels=self.backbone.embed_dims[1], out_channels=self.backbone.embed_dims[1])
+        self.le3 = LocalEnhanceModule(in_channels=self.backbone.embed_dims[2], out_channels=self.backbone.embed_dims[2])
+        self.le4 = LocalEnhanceModule(in_channels=self.backbone.embed_dims[3], out_channels=self.backbone.embed_dims[3])
         # ----------------------------------------------------------------
         # Pyramid
         # ----------------------------------------------------------------
-        self.pyramid = BiFPN([self.backbone.embed_dims[0],
-                              self.backbone.embed_dims[1],
-                              self.backbone.embed_dims[2],
-                              self.backbone.embed_dims[3]])
+        self.pyramid =  PAN(
+                            num_levels=4,
+                            in_channels=[
+                                            self.backbone.embed_dims[0],
+                                            self.backbone.embed_dims[1],
+                                            self.backbone.embed_dims[2],
+                                            self.backbone.embed_dims[3]
+                                        ],
+                            out_channels=64,
+                        )
 
         # ----------------------------------------------------------------
         # Prediction
         # ----------------------------------------------------------------
+        self.pred_type = pred_type
+        self.aa = AttentionAggregationModule(256, 256)
         self.linear_pred = nn.Sequential(
             nn.Dropout(p = dropout),
             nn.Conv2d(256, 1, kernel_size=1),
@@ -115,16 +132,37 @@ class FFESNet(nn.Module):
         out_4 = self.backbone.norm4(out_4)
         out_4 = out_4.reshape(B, H, W, -1).permute(0, 3, 1, 2).contiguous()  #(Batch_Size, self.backbone.embed_dims[3], 11, 11)
 
+
         # ----------------------------------------------------------------
         # Pyramid and prediction
         # ----------------------------------------------------------------
-        p1, p2, p3, p4, _ = self.pyramid([out_1, out_2, out_3, out_4])
-        
-        p4 = F.interpolate(p4, scale_factor=8, mode='bilinear', align_corners=False)
-        p3 = F.interpolate(p3, scale_factor=4, mode='bilinear', align_corners=False)
-        p2 = F.interpolate(p2, scale_factor=2, mode='bilinear', align_corners=False)
+        if self.use_le:
+            out_1 = self.le1(out_1)
+            out_2 = self.le2(out_2)
+            out_3 = self.le3(out_3)
+            out_4 = self.le4(out_4)
 
-        out = self.linear_pred(torch.cat([p1, p2, p3, p4], dim=1))
+        # ----------------------------------------------------------------
+        # Pyramid and prediction
+        # ----------------------------------------------------------------
+        p1, p2, p3, p4 = self.pyramid([out_1, out_2, out_3, out_4])
+        
+        if self.pred_type == 'linear':
+            # ------------------------------------------------------------
+            # Linear prediction
+            # ------------------------------------------------------------
+            p4 = F.interpolate(p4, scale_factor=8, mode='bilinear', align_corners=False)
+            p3 = F.interpolate(p3, scale_factor=4, mode='bilinear', align_corners=False)
+            p2 = F.interpolate(p2, scale_factor=2, mode='bilinear', align_corners=False)
+            out = self.linear_pred(torch.cat([p1, p2, p3, p4], dim=1))
+        else:
+            # ------------------------------------------------------------
+            # Attention Aggregation
+            # ------------------------------------------------------------
+            p4 = F.interpolate(p4, scale_factor=8, mode='bilinear', align_corners=False)
+            p3 = F.interpolate(p3, scale_factor=4, mode='bilinear', align_corners=False)
+            p2 = F.interpolate(p2, scale_factor=2, mode='bilinear', align_corners=False)
+            out = self.linear_pred(self.aa(p1, p2, p3, p4))
         
         return out
     
@@ -137,14 +175,14 @@ def main():
     # --------------------------------------------------------------------
     # Feedforward
     # --------------------------------------------------------------------
-    x = torch.rand(1,3,384,384).to(device)
+    x = torch.rand(1,3,352,352).to(device)
     y_pred = model(x)
     print('Successfully feedfoward!!!')
 
     # --------------------------------------------------------------------
     # Backprop
     # --------------------------------------------------------------------
-    y = torch.rand(1,1,384,384).to(device)
+    y = torch.rand(1,1,352,352).to(device)
     y_pred = F.upsample(y_pred, size=y.shape[2:], mode='bilinear', align_corners=False)
     y_pred = y_pred.sigmoid()
     loss = F.binary_cross_entropy_with_logits(y_pred, y, reduction='mean')

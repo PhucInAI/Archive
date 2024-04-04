@@ -16,6 +16,7 @@ import matplotlib.pyplot as plt
 
 from FFESNet.utils.dataset import PolypDataset, TestDataset
 from FFESNet.utils.losses.structure_loss import structure_loss
+from FFESNet.models.FFESNet import FFESNet
 
 
 def parse_args():
@@ -24,6 +25,7 @@ def parse_args():
     parser.add_argument('--config', '-c', type=str, required=True       , help='Path of the config file')
     parser.add_argument('--device', '-d', type=int, required=True       , help='Device to use')
     parser.add_argument('--output', '-o', type=str, default='./runs'    , help='Path of ouput folder')
+    parser.add_argument('--name'  , '-n', type=str, default=''          , help='Name of output model')
 
     args = parser.parse_args()
 
@@ -51,24 +53,12 @@ def load_loss(loss_name):
     return loss_function
 
 
-def load_model(model_arch, model_type, drop_rate):
+def load_model(model_type, drop_rate, use_le, use_aa):
     """Load model"""
-
-    if model_arch == 'ESFPNet':
-        from FFESNet.models.ESFPNet import ESFPNet
-        model = ESFPNet(model_type=model_type)
-        return model
-
-    if model_arch == 'FFESNet_BiFPN':
-        from  FFESNet.models.FFESNet_BiFPN import FFESNet
-    elif model_arch == 'FFESNet_BiFPN_AttentionAggregation':
-        from FFESNet.models.FFESNet_BiFPN_AttentionAggregation import FFESNet
-    elif model_arch == 'FFESNet_A2FPN':
-        from FFESNet.models.FFESNet_A2FPN import FFESNet
-    elif model_arch == 'FFESNet_LE_A2FPN':
-        from FFESNet.models.FFESNet_LE_A2FPN import FFESNet
-
-    model = FFESNet(model_type=model_type, dropout=drop_rate)
+    model = FFESNet(model_type=model_type,
+                    dropout=drop_rate,
+                    use_le=use_le,
+                    pred_type = False if use_aa else True)
     
     return model
 
@@ -193,8 +183,9 @@ def train_loop(config, numIters):
     global device
     global output_path
 
-    model_type = config['model']['model_type']
-    model_arch = config['model']['model_arch']
+    model_type = config['model']['model_backbone']
+    use_le = bool(config['model']['use_le'])
+    use_aa = bool(config['model']['use_aa'])
 
     drop_rate = float(config['hyparameters']['drop_rate'])
     n_epochs = int(config['hyparameters']['n_epochs'])
@@ -227,12 +218,11 @@ def train_loop(config, numIters):
     # Clear GPU cache and load model
     # --------------------------------------------------------------------
     torch.cuda.empty_cache()
-    model = load_model(model_arch, model_type, drop_rate)
+    model = load_model(model_type, drop_rate, use_le, use_aa)
     model.to(device)
     lr = init_lr
     
     model_optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
-    scheduler = torch.optim.lr_scheduler.StepLR(model_optimizer, step_size=25, gamma=0.25)
     
     # --------------------------------------------------------------------
     # Keep track of losses over time
@@ -297,10 +287,6 @@ def train_loop(config, numIters):
             logger.info('Epoch [{:5d}/{:5d}] | preliminary loss: {:6.6f} '.format(num_epoch, n_epochs, loss.item()))
 
             # ------------------------------------------------------------
-            # Update lr
-            scheduler.step()
-
-            # ------------------------------------------------------------
             # Log loss of valid
             validation_coeff = evaluate(config, model)
             logger.info('Epoch [{:5d}/{:5d}] | validation coeffient: {:6.6f} '.format(num_epoch, n_epochs, validation_coeff))
@@ -323,12 +309,13 @@ def train_loop(config, numIters):
     return losses, coeff_max
 
 
-def train_repeats(config, output_dir):
+def train_repeats(config, output_dir, model_name):
     """Train pipeline 1 repeat"""
     global device
     global output_path
 
-    model_name = config['model']['model_name']
+    if model_name == '':
+        model_name = config['model']['model_name']
     repeats = int(config['hyparameters']['repeats'])
     # --------------------------------------------------------------------
     # Prepare folder
@@ -359,7 +346,7 @@ def main():
     with open(args.config, 'r', encoding='utf-8') as config_file:
         config = yaml.safe_load(config_file)
 
-    train_repeats(config, args.output)
+    train_repeats(config, args.output, args.name)
 
 
 if __name__=="__main__":
