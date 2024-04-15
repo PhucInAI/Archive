@@ -21,7 +21,9 @@ conda activate masters
 
 conda install -c conda-forge pytorch-gpu=2.0.0 torchvision tensorflow-gpu opencv
 conda install -c conda-forge matplotlib seaborn scikit-learn scikit-image jupyter 
+conda install -c conda-forge fairlearn
 
+pip install raiwidgets
 pip install pyspark
 ```
 
