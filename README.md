@@ -11,7 +11,7 @@ Masters courses
 
     # Declare JAVA_HOME in /etc/environment
     sudo nano /etc/environment
-    JAVA_HOME="/usr/lib/jvm/java-11-openjdk-amd64"
+    JAVA_HOME="/usr/lib/jvm/java-21-openjdk-amd64"
     source /etc/environment
 
 ```
@@ -26,6 +26,3 @@ pip install raiwidgets
 pip install pyspark
 pip install fairlearn
 ```
-
-
-
