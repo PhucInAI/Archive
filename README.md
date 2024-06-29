@@ -21,7 +21,7 @@ conda activate masters
 
 pip install torch==2.0.1 torchvision==0.15.2 torchaudio==2.0.2 --index-url https://download.pytorch.org/whl/cu118
 pip install tensorflow[and-cuda]==2.14.0
-pip install matplotlib seaborn scikit-learn scikit-image jupyter openpyxl
+pip install matplotlib seaborn scikit-learn scikit-image jupyter openpyxl opencv-python nltk
 pip install raiwidgets
 pip install pyspark
 pip install fairlearn
