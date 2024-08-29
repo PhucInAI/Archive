@@ -1,0 +1,16 @@
+dataset :
+  train : /home/ptn/Storage/Research/FFESNet/data/Kvasir_Splited/trainSplited
+  valid : /home/ptn/Storage/Research/FFESNet/data/Kvasir_Splited/validationSplited
+  test  : /home/ptn/Storage/Research/FFESNet/data/Kvasir_Splited/testSplited
+
+model:
+  model_name      : 'LA_ESFPNet_B0_Kvasir'
+  model_backbone  : 'B0'
+
+hyparameters:
+  init_trainsize  : 352
+  batch_size      : 64
+  repeats         : 1
+  n_epochs        : 100
+  learning_rate   : 1e-4
+  drop_rate       : 0.2

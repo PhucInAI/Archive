@@ -18,10 +18,12 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 '''
 
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 import tensorflow as tf
 import numpy as np
 from scipy.ndimage import convolve, center_of_mass, distance_transform_edt as dtedt
-import os
+
 import glob
 import shutil
 from tqdm import tqdm
@@ -344,51 +346,51 @@ class Emeasure(object):
 # test 
 if __name__ == "__main__":
 
-    # --------------------------------------------------------------------
-    # LA
-    # --------------------------------------------------------------------
-    gt_folder = '/home/ptn/Storage/FFESNet/data/CVC-ClinicDB_Splited/testSplited/masks'
-    # pred_folder = '/home/ptn/Storage/FFESNet/runs/LA_FFESNet_PAN_CVC-ClinicDB/01/predict'
-    pred_folder = '/home/ptn/Storage/FFESNet/backups/thesis/SavedESFPNetandImageResult/Table_3_LA_Two_Datasets/CVC-ClinicDB_Splited_0.949/prediction'
+    # # --------------------------------------------------------------------
+    # # LA
+    # # --------------------------------------------------------------------
+    # gt_folder = '/home/ptn/Storage/FFESNet/data/CVC-ClinicDB_Splited/testSplited/masks'
+    # # pred_folder = '/home/ptn/Storage/FFESNet/runs/LA_FFESNet_PAN_CVC-ClinicDB/01/predict'
+    # pred_folder = '/home/ptn/Storage/FFESNet/backups/thesis/SavedESFPNetandImageResult/Table_3_LA_Two_Datasets/CVC-ClinicDB_Splited_0.949/prediction'
 
-    wFb_metric = WFbetaMetric()
-    smeasure_metric = SMeasure()
-    emeasure_metric = Emeasure()
+    # wFb_metric = WFbetaMetric()
+    # smeasure_metric = SMeasure()
+    # emeasure_metric = Emeasure()
 
-    m_dice = []
-    m_iou = []
-    m_wfb = []
-    m_smeasure = []
-    m_emeasure = []
-    m_mae = []
+    # m_dice = []
+    # m_iou = []
+    # m_wfb = []
+    # m_smeasure = []
+    # m_emeasure = []
+    # m_mae = []
 
-    gt_path_lst = glob.glob(os.path.join(gt_folder, '*png')) + glob.glob(os.path.join(gt_folder, '*jpg'))
-    for gt_path in tqdm(gt_path_lst):
-        pred_path = os.path.join(pred_folder, os.path.basename(gt_path))
+    # gt_path_lst = glob.glob(os.path.join(gt_folder, '*png')) + glob.glob(os.path.join(gt_folder, '*jpg'))
+    # for gt_path in tqdm(gt_path_lst):
+    #     pred_path = os.path.join(pred_folder, os.path.basename(gt_path))
 
-        y_mask = read_mask(gt_path)
-        y_pred = read_mask(pred_path)
+    #     y_mask = read_mask(gt_path)
+    #     y_pred = read_mask(pred_path)
 
-        dice_metric = dice_coef(y_mask, y_pred)
-        iou = iou_metric(y_mask, y_pred)
-        wfb = wFb_metric(y_mask=y_mask, y_pred=y_pred)
-        smeasure = smeasure_metric(y_mask=y_mask, y_pred=y_pred)
-        emeasure = emeasure_metric(y_mask=y_mask, y_pred=y_pred)
-        mae = MAE(y_mask=y_mask, y_pred=y_mask)
+    #     dice_metric = dice_coef(y_mask, y_pred)
+    #     iou = iou_metric(y_mask, y_pred)
+    #     wfb = wFb_metric(y_mask=y_mask, y_pred=y_pred)
+    #     smeasure = smeasure_metric(y_mask=y_mask, y_pred=y_pred)
+    #     emeasure = emeasure_metric(y_mask=y_mask, y_pred=y_pred)
+    #     mae = MAE(y_mask=y_mask, y_pred=y_mask)
 
-        m_dice.append(dice_metric.numpy())
-        m_iou.append(iou.numpy())
-        m_wfb.append(wfb.numpy())
-        m_smeasure.append(emeasure.numpy())
-        m_emeasure.append(smeasure.numpy())
-        m_mae.append(mae.numpy())
+    #     m_dice.append(dice_metric.numpy())
+    #     m_iou.append(iou.numpy())
+    #     m_wfb.append(wfb.numpy())
+    #     m_smeasure.append(emeasure.numpy())
+    #     m_emeasure.append(smeasure.numpy())
+    #     m_mae.append(mae.numpy())
 
-    print('Mean dice    :', np.mean(m_dice))
-    print('Mean IoU     :', np.mean(m_iou))
-    print('Mean WFB     :', np.mean(m_wfb))
-    print('Mean SMeasure:', np.mean(m_smeasure))
-    print('Mean EMeasure:', np.mean(m_emeasure))
-    print('MAE          :', np.mean(m_mae))
+    # print('Mean dice    :', np.mean(m_dice))
+    # print('Mean IoU     :', np.mean(m_iou))
+    # print('Mean WFB     :', np.mean(m_wfb))
+    # print('Mean SMeasure:', np.mean(m_smeasure))
+    # print('Mean EMeasure:', np.mean(m_emeasure))
+    # print('MAE          :', np.mean(m_mae))
 
     # # --------------------------------------------------------------------
     # # GA, note that train code incorrect PB to GA
@@ -463,61 +465,56 @@ if __name__ == "__main__":
     #         print('Mean SMeasure:', f"{final_smeasure:.3f}")
     #         # print('Mean EMeasure:', f"{final_emeasure:.3f}")
 
-    # # --------------------------------------------------------------------
-    # # PB, note that train code incorrect GA to PB
-    # # --------------------------------------------------------------------
-    # # datasets = ['ETIS-LaribPolypDB', 'CVC-ColonDB']
-    # # datasets = ['ETIS-LaribPolypDB']
-    # datasets = ['Kvasir', 'CVC-ClinicDB', 'CVC-300', 'CVC-ColonDB', 'ETIS-LaribPolypDB']
-    # pred_n_lst = ['01', '02']
-    # gt_dir = '/home/ptn/Storage/FFESNet/data/TestDataset'
-    # model_dir = '/home/ptn/Storage/FFESNet/backups/PB'
-    # model_path_lst = list(sorted(glob.glob(os.path.join(model_dir, '*'))))
+    # --------------------------------------------------------------------
+    # PB
+    # --------------------------------------------------------------------
+    # datasets = ['ETIS-LaribPolypDB', 'CVC-ColonDB']
+    # datasets = ['ETIS-LaribPolypDB']
+    datasets = ['Kvasir', 'CVC-ClinicDB', 'CVC-300', 'CVC-ColonDB', 'ETIS-LaribPolypDB']
+    gt_dir = '/home/ptn/Storage/Research/FFESNet/data/TestDataset'
+    model_dir = '/home/ptn/Storage/Research/FFESNet/runs/FFESNet_B4'
+    model_path_lst = list(sorted(glob.glob(os.path.join(model_dir, '*'))))
 
     # for model_path in model_path_lst:
     #     print("=-=-=-=-=-=-=-=-=-=-=-=-=--=-=-=-=-=-=-=-=-=-=-=-=-=-==-=-=-=-=-=-=")
     #     print(os.path.basename(model_path))
 
-    #     for dataset in datasets:
-    #         print("=-=-=-=-=-=-=-=-=-=-=")
-    #         print(dataset)
+    for dataset in datasets:
+        print("=-=-=-=-=-=-=-=-=-=-=")
+        print(dataset)
 
-    #         final_dice = 0
-    #         final_iou = 0
-    #         total_score = 0
+        final_dice = 0
+        final_iou = 0
+        total_score = 0
 
-    #         gt_folder = os.path.join(gt_dir, dataset, 'masks')
-    #         gt_path_lst = glob.glob(os.path.join(gt_folder, '*png')) + glob.glob(os.path.join(gt_folder, '*jpg'))
+        gt_folder = os.path.join(gt_dir, dataset, 'masks')
+        gt_path_lst = glob.glob(os.path.join(gt_folder, '*png')) + glob.glob(os.path.join(gt_folder, '*jpg'))
 
-    #         for pred_n in pred_n_lst:
-    #             try:
-    #                 pred_folder = os.path.join(model_path, pred_n, 'predict_GA', dataset)
+        pred_folder = os.path.join(model_dir, '01', 'predict_PB', dataset)
 
-    #                 m_dice = []
-    #                 m_iou = []
-    #                 for gt_path in gt_path_lst:
-    #                     pred_path = os.path.join(pred_folder, os.path.basename(gt_path))
+        m_dice = []
+        m_iou = []
+        for gt_path in tqdm(gt_path_lst):
+            pred_path = os.path.join(pred_folder, os.path.basename(gt_path))
 
-    #                     y_mask = read_mask(gt_path)
-    #                     y_pred = read_mask(pred_path)
+            y_mask = read_mask(gt_path)
+            y_pred = read_mask(pred_path)
 
-    #                     dice_metric = dice_coef(y_mask, y_pred)
-    #                     iou = iou_metric(y_mask, y_pred)
+            dice_metric = dice_coef(y_mask, y_pred)
+            iou = iou_metric(y_mask, y_pred)
 
-    #                     m_dice.append(dice_metric.numpy())
-    #                     m_iou.append(iou.numpy())
+            m_dice.append(dice_metric.numpy())
+            m_iou.append(iou.numpy())
 
-    #                 m_dice = np.mean(m_dice)
-    #                 m_iou = np.mean(m_iou)
+        m_dice = np.mean(m_dice)
+        m_iou = np.mean(m_iou)
 
-    #                 if m_dice + m_iou > total_score:
-    #                     final_dice = m_dice
-    #                     final_iou = m_iou
-    #             except:
-    #                 pass
+        if m_dice + m_iou > total_score:
+            final_dice = m_dice
+            final_iou = m_iou
 
-    #         print('Mean dice    :', f"{final_dice:.3f}")
-    #         print('Mean IoU     :', f"{final_iou:.3f}")
+        print('Mean dice    :', f"{final_dice:.3f}")
+        print('Mean IoU     :', f"{final_iou:.3f}")
 
 
     # wFb_metric = WFbetaMetric()

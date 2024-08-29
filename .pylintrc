@@ -1,0 +1,5 @@
+[FORMAT]
+max-line-length=150
+
+[MESSAGES CONTROL]
+disable=too-many-locals, too-many-instance-attributes, too-many-arguments

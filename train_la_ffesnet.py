@@ -5,21 +5,23 @@ import argparse
 import yaml
 import numpy as np
 import torch
+from torch import nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 import imageio
 from skimage import img_as_ubyte
-import warnings
-warnings.filterwarnings("ignore")
-import logging
 import matplotlib.pyplot as plt
 
+from FFESNet.models.model import Model
 from FFESNet.utils.dataset import PolypDataset, TestDataset
-from FFESNet.utils.losses.structure_loss import structure_loss
-from FFESNet.models.FFESNet import FFESNet
+from FFESNet.utils.ai_logger import aiLogger
+
+import warnings
+warnings.filterwarnings("ignore")
 
 
 def parse_args():
+    """Parse arguments"""
     parser = argparse.ArgumentParser(description='Arguments of Learning Ability training pipeline')
 
     parser.add_argument('--config', '-c', type=str, required=True       , help='Path of the config file')
@@ -32,6 +34,7 @@ def parse_args():
     return args
 
 
+# pylint: disable=import-outside-toplevel
 def load_loss(loss_name):
     """Load loss function"""
 
@@ -53,26 +56,23 @@ def load_loss(loss_name):
     return loss_function
 
 
-def load_model(model_type, drop_rate, use_le, use_aa):
+def load_model(model_type):
     """Load model"""
-    model = FFESNet(model_type=model_type,
-                    dropout=drop_rate,
-                    use_le=use_le,
-                    pred_type = False if use_aa else True)
-    
+    model = Model(model_type=model_type)
+
     return model
 
 
-def evaluate(config, model):  
+def evaluate(config, model):
     # device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     # ESFPNet.eval()
-    
+
     global device
 
     val = 0
     count = 0
     smooth = 1e-4
-    
+
     # --------------------------------------------------------------------
     # Set up data
     # --------------------------------------------------------------------
@@ -81,7 +81,7 @@ def evaluate(config, model):
     val_images_path = os.path.join(val_path, 'images')
     val_masks_path = os.path.join(val_path, 'masks')
     val_loader = TestDataset(val_images_path,val_masks_path, init_trainsize)
-    
+
     # --------------------------------------------------------------------
     # Validating pipleline
     # --------------------------------------------------------------------
@@ -93,31 +93,43 @@ def evaluate(config, model):
         gt /= (gt.max() + 1e-8)
 
         image = image.to(device)
-        
-        pred = model(image)
+
+        pred, pred_aux = model(image)
+
         pred = F.upsample(pred, size=gt.shape, mode='bilinear', align_corners = False)
-        
         pred = pred.sigmoid()
         threshold = torch.tensor([0.5]).to(device)
         pred = (pred > threshold).float() * 1
         pred = pred.data.cpu().numpy().squeeze()
         pred = (pred - pred.min()) / (pred.max() - pred.min() + 1e-8)
-        
         target = np.array(gt)
         input_flat = np.reshape(pred,(-1))
         target_flat = np.reshape(target,(-1))
- 
         intersection = (input_flat*target_flat)
         loss =  (2 * intersection.sum() + smooth) / (pred.sum() + target.sum() + smooth)
 
+        # pred_aux = F.upsample(pred_aux, size=gt.shape, mode='bilinear', align_corners = False)
+        # pred_aux = pred_aux.sigmoid()
+        # threshold = torch.tensor([0.5]).to(device)
+        # pred_aux = (pred_aux > threshold).float() * 1
+        # pred_aux = pred_aux.data.cpu().numpy().squeeze()
+        # pred_aux = (pred_aux - pred_aux.min()) / (pred_aux.max() - pred_aux.min() + 1e-8)
+        # target = np.array(gt)
+        # input_flat = np.reshape(pred_aux,(-1))
+        # target_flat = np.reshape(target,(-1))
+        # intersection = (input_flat*target_flat)
+        # loss_aux =  (2 * intersection.sum() + smooth) / (pred_aux.sum() + target.sum() + smooth)
+
+        # loss = loss + 0.5*loss_aux
+
         a =  '{:.4f}'.format(loss)
         a = float(a)
-        
+
         val = val + a
         count = count + 1
-        
+
     model.train()
-    
+
     return val/count
 
 
@@ -142,7 +154,7 @@ def save_result(numIters, config, model_path):
     test_images_path = os.path.join(test_path, 'images')
     test_masks_path = os.path.join(test_path, 'masks')
     test_loader = TestDataset(test_images_path, test_masks_path, init_trainsize)
-    
+
 
     # --------------------------------------------------------------------
     # Testing pipeline
@@ -153,14 +165,14 @@ def save_result(numIters, config, model_path):
         gt /= (gt.max() + 1e-8)
         image = image.to(device)
 
-        pred = model(image)
+        pred, _ = model(image)
         pred = F.upsample(pred, size=gt.shape, mode='bilinear', align_corners=False)
         pred = pred.sigmoid()
         threshold = torch.tensor([0.5]).to(device)
         pred = (pred > threshold).float() * 1
         pred = pred.data.cpu().numpy().squeeze()
         pred = (pred - pred.min()) / (pred.max() - pred.min() + 1e-8)
-        
+
         imageio.imwrite(os.path.join(save_path, name),img_as_ubyte(pred))
 
 
@@ -174,7 +186,7 @@ def plot_result(result_lst, save_path):
     plt.ylabel('Loss')
     plt.legend()
     plt.grid(True)
-    
+
     # Save the plot to a file
     plt.savefig(save_path)
 
@@ -184,52 +196,35 @@ def train_loop(config, numIters):
     global output_path
 
     model_type = config['model']['model_backbone']
-    use_le = bool(config['model']['use_le'])
-    use_aa = bool(config['model']['use_aa'])
 
-    drop_rate = float(config['hyparameters']['drop_rate'])
     n_epochs = int(config['hyparameters']['n_epochs'])
     init_lr = float(config['hyparameters']['learning_rate'])
     init_trainsize = int(config['hyparameters']['init_trainsize'])
     batch_size = int(config['hyparameters']['batch_size'])
 
     # --------------------------------------------------------------------
-    # Setup log
-    # --------------------------------------------------------------------
-    # Set up the logging configuration
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
-    # Create a file handler that writes log messages to a file
-    file_handler = logging.FileHandler(os.path.join(output_path, 'logfile_{}.log'.format(str(numIters).zfill(2))))
-    file_handler.setLevel(logging.INFO) 
-    file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
-
-    # Create a stream handler that writes log messages to the console
-    stream_handler = logging.StreamHandler()
-    stream_handler.setLevel(logging.INFO)
-    stream_handler.setFormatter(logging.Formatter('%(levelname)s - %(message)s'))
-
-    # Get the root logger and add the handlers
-    logger = logging.getLogger()
-    logger.addHandler(file_handler)
-    logger.addHandler(stream_handler)
-
-    # --------------------------------------------------------------------
     # Clear GPU cache and load model
     # --------------------------------------------------------------------
     torch.cuda.empty_cache()
-    model = load_model(model_type, drop_rate, use_le, use_aa)
+    model = load_model(model_type)
     model.to(device)
     lr = init_lr
-    
-    model_optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
-    
+
+    sigma1 = nn.Parameter(torch.tensor(1.0), requires_grad=True)
+    sigma2 = nn.Parameter(torch.tensor(1.0), requires_grad=True)
+
+    model_optimizer = torch.optim.AdamW([
+    {'params': list(model.parameters())},
+    {'params': [sigma1, sigma2]}
+], lr=lr)
+
+
     # --------------------------------------------------------------------
     # Keep track of losses over time
     # --------------------------------------------------------------------
     losses = []
     coeff_max = 0
-    
+
     # --------------------------------------------------------------------
     # Set up data
     # --------------------------------------------------------------------
@@ -238,7 +233,7 @@ def train_loop(config, numIters):
     train_masks_path = os.path.join(train_path, 'masks')
     trainDataset = PolypDataset(train_images_path, train_masks_path, trainsize = init_trainsize, augmentations = True)
     train_loader = DataLoader(dataset = trainDataset, batch_size = batch_size, shuffle = True)
-    
+
     iter_X = iter(train_loader)
     steps_per_epoch = len(iter_X)
     num_epoch = 0
@@ -255,27 +250,34 @@ def train_loop(config, numIters):
         if step % steps_per_epoch == 0:
             iter_X = iter(train_loader)
             num_epoch = num_epoch + 1
-        
+
         # ----------------------------------------------------------------
         # Compute loss in 1 step
         # ----------------------------------------------------------------
         images, masks = next(iter_X)
         images = images.to(device)
         masks = masks.to(device)
-       
+
         model.zero_grad()
-        out = model(images)
+        out, out_aux = model(images)
         out = F.interpolate(out, size=masks.shape[2:], mode='bilinear', align_corners=False)
-        
+        out_aux = F.interpolate(out_aux, size=masks.shape[2:], mode='bilinear', align_corners=False)
+
         if 'loss' in config['hyparameters']:
             loss_name = config['hyparameters']['loss']
         else:
             loss_name = 'structure'
         loss_function = load_loss(loss_name)
+
         loss = loss_function(out, masks)
-        loss.backward()
-        model_optimizer.step() 
-        
+        loss_aux = loss_function(out_aux, masks)
+        total_loss = (1.0 / (2 * sigma1 ** 2)) * loss + \
+                     (1.0 / (2 * sigma2 ** 2)) * loss_aux + \
+                     torch.log(sigma1 * sigma2)
+
+        total_loss.backward()
+        model_optimizer.step()
+
         # ----------------------------------------------------------------
         # Validate each epoch
         # ----------------------------------------------------------------
@@ -284,28 +286,30 @@ def train_loop(config, numIters):
             # ------------------------------------------------------------
             # Log loss of train
             losses.append(loss.item())
-            logger.info('Epoch [{:5d}/{:5d}] | preliminary loss: {:6.6f} '.format(num_epoch, n_epochs, loss.item()))
+            aiLogger.info('Epoch [{:5d}/{:5d}] | preliminary loss: {:6.6f} '.format(num_epoch, n_epochs, loss.item()))
+            aiLogger.info(sigma1)
+            aiLogger.info(sigma2)
 
             # ------------------------------------------------------------
             # Log loss of valid
             validation_coeff = evaluate(config, model)
-            logger.info('Epoch [{:5d}/{:5d}] | validation coeffient: {:6.6f} '.format(num_epoch, n_epochs, validation_coeff))
-            
+            aiLogger.info('Epoch [{:5d}/{:5d}] | validation coeffient: {:6.6f} '.format(num_epoch, n_epochs, validation_coeff))
+
             # ------------------------------------------------------------
             # Save model if get better validation
             if coeff_max < validation_coeff:
                 coeff_max = validation_coeff
-                
+
                 save_model_folder = os.path.join(output_path, str(numIters).zfill(2))
                 os.makedirs(save_model_folder, exist_ok=True)
                 save_model_path = os.path.join(save_model_folder, 'model_{}_{}.pt'.format(numIters, num_epoch))
                 torch.save(model, save_model_path)
-                logger.info('Save Learning Ability Optimized Model at Epoch [{:5d}/{:5d}]'.format(num_epoch, n_epochs))
+                aiLogger.info('Save Learning Ability Optimized Model at Epoch [{:5d}/{:5d}]'.format(num_epoch, n_epochs))
 
 
     save_result(numIters, config, save_model_path)
     loss_path = os.path.join(output_path, 'loss_{}.png'.format(str(numIters)).zfill(2))
-    plot_result(losses, loss_path)     
+    plot_result(losses, loss_path)
     return losses, coeff_max
 
 
