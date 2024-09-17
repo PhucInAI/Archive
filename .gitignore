@@ -170,6 +170,3 @@ cython_debug/
 **pretrained**
 **weights**
 **runs**
-**results**
-**mamba**
-**MambaVision**

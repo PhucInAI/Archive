@@ -11,18 +11,6 @@ LJMU thesis work, focus on medical segmentation with ViTs
     pip install mmcv==2.2.0 -f https://download.openmmlab.com/mmcv/dist/cu118/torch2.3/index.html
     pip install matplotlib seaborn scikit-learn scikit-image jupyter
     pip install tensorflow==2.14.0
-
-    git clone git@github.com:state-spaces/mamba.git
-    cd mamba
-    pip install --no-build-isolation .
-    cd ..
-
-    git@github.com:NVlabs/MambaVision.git
-    cd MambaVision
-    # In setup.py, edit install_requires to `install_requires=['torch >= 2.1.2', 'timm', 'einops'],`
-    pip install .
-    cd ..
-
-    pip install mambavision
+    
     pip install -e .
 ```
