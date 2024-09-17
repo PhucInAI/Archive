@@ -1,32 +1,38 @@
+"""Train Generalibity"""
+
+
 import os
-import glob
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 import shutil
 import argparse
 import yaml
 import numpy as np
 import torch
-from torch import nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 import imageio
 from skimage import img_as_ubyte
-import warnings
-warnings.filterwarnings("ignore")
-import logging
+
 import matplotlib.pyplot as plt
 
-
-from FFESNet.models.model import Model
+from FFESNet.model.model_based_mit import ModelBasedMit
+from FFESNet.model.model_based_mamba import ModelBasedMamba
 from FFESNet.utils.dataset import PolypDataset, TestDataset
 from FFESNet.utils.losses.structure_loss import structure_loss
 from FFESNet.utils.ai_logger import aiLogger
 
+import warnings
+warnings.filterwarnings("ignore")
+
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+DATASET_TEST = ['Kvasir', 'CVC-ColonDB', 'CVC-ClinicDB', 'ETIS-LaribPolypDB', 'CVC-300']
+
 
 def parse_args():
-    parser = argparse.ArgumentParser(description='Arguments of Learning Ability training pipeline')
+    """Parse arguments from terminal"""
+    parser = argparse.ArgumentParser(description='Arguments of General training pipeline')
 
     parser.add_argument('--config', '-c', type=str, required=True       , help='Path of the config file')
-    parser.add_argument('--device', '-d', type=int, required=True       , help='Device to use')
     parser.add_argument('--output', '-o', type=str, default='./runs'    , help='Path of ouput folder')
     parser.add_argument('--type'  , '-t', type=str, default='PB'        , help='Type of training, PB or GA')
     args = parser.parse_args()
@@ -34,27 +40,40 @@ def parse_args():
     return args
 
 
-def load_model(model_type):
+def load_model(model_backbone_type, feature_fuse, prediction='linear'):
     """Load model"""
-    model = Model(model_type=model_type)
+    if model_backbone_type in ['B0', 'B1', 'B2', 'B3', 'B4']:
+        model = ModelBasedMit(
+                                model_backbone_type=model_backbone_type,
+                                feature_fuse=feature_fuse,
+                                prediction=prediction,
+                             )
+    elif model_backbone_type in ['T', 'T2', 'S', 'B', 'L', 'L2']:
+        model = ModelBasedMamba(
+                                model_backbone_type=model_backbone_type,
+                                feature_fuse=feature_fuse,
+                                prediction=prediction,
+                               )
 
     return model
 
 
-def evaluate(config, model):
-    # device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    # ESFPNet.eval()
-
-    global device
-
+def evaluate(config, model): # pylint: disable = W0621
+    """Evaluate model"""
+    # --------------------------------------------------------------------
+    # Switch model to eval mode and init output
+    # --------------------------------------------------------------------
     model.eval()
 
     val = 0
     dataset_count = 0
-    datasetValidation = []
+    dataset_validation = []
     smooth = 1e-4
 
-    for data_name in datasetTest:
+    # --------------------------------------------------------------------
+    # Loop for each dataset
+    # --------------------------------------------------------------------
+    for data_name in DATASET_TEST:
         # ----------------------------------------------------------------
         # Set up data
         # ----------------------------------------------------------------
@@ -69,20 +88,18 @@ def evaluate(config, model):
         # ----------------------------------------------------------------
 
         count = 0
-        total_meanDice = 0
+        total_mean_dice = 0
 
-        for i in range(val_loader.size):
-            image, gt, name = val_loader.load_data()
+        for _ in range(val_loader.size):
+            image, gt, _ = val_loader.load_data()
             gt = np.asarray(gt, np.float32)
             gt /= (gt.max() + 1e-8)
 
-            image = image.to(device)
-
-            pred, pred_aux = model(image)
+            image = image.to(DEVICE)
+            pred, _ = model(image)
             pred = F.upsample(pred, size=gt.shape, mode='bilinear', align_corners = False)
-
             pred = pred.sigmoid()
-            threshold = torch.tensor([0.5]).to(device)
+            threshold = torch.tensor([0.5]).to(DEVICE)
             pred = (pred > threshold).float() * 1
             pred = pred.data.cpu().numpy().squeeze()
             pred = (pred - pred.min()) / (pred.max() - pred.min() + 1e-8)
@@ -91,39 +108,36 @@ def evaluate(config, model):
             input_flat = np.reshape(pred,(-1))
             target_flat = np.reshape(target,(-1))
 
-            intersection = (input_flat*target_flat)
+            intersection = input_flat*target_flat
             loss =  (2 * intersection.sum() + smooth) / (pred.sum() + target.sum() + smooth)
 
-            Dice =  '{:.4f}'.format(loss)
-            Dice = float(Dice)
-            total_meanDice = total_meanDice + Dice
+            dice = f'{loss:.4f}'
+            dice = float(dice)
+            total_mean_dice = total_mean_dice + dice
             count = count + 1
 
-        datasetValidation.append(total_meanDice/count)
-        val = val + total_meanDice/count
+        dataset_validation.append(total_mean_dice/count)
+        val = val + total_mean_dice/count
         dataset_count = dataset_count +1
 
+    # --------------------------------------------------------------------
+    # Switch back to train mode and return result
+    # --------------------------------------------------------------------
     model.train()
 
-    return val/dataset_count, datasetValidation
+    return val/dataset_count, dataset_validation
 
 
-def save_result(numIters, config, model_folder):
-    global device
-    global output_path
-
-    # --------------------------------------------------------------------
-    # Predict PB
-    # --------------------------------------------------------------------
-    for data_name in datasetTest:
-
-        save_path = os.path.join(output_path, str(numIters).zfill(2), 'predict_PB', data_name)
+def save_result(num_iter, config, model_folder, output_path):
+    """Save result (predicted image)"""
+    for data_name in DATASET_TEST:
+        save_path = os.path.join(output_path, str(num_iter).zfill(2), data_name)
         os.makedirs(save_path, exist_ok=True)
 
         # ----------------------------------------------------------------
         # Load model
         # ----------------------------------------------------------------
-        model_path = os.path.join(model_folder, 'model_PB.pt'.format(data_name))
+        model_path = os.path.join(model_folder, 'model_PB.pt')
         model = torch.load(model_path)
         model.eval()
 
@@ -139,60 +153,16 @@ def save_result(numIters, config, model_folder):
         # ----------------------------------------------------------------
         # Testing pipeline
         # ----------------------------------------------------------------
-        for i in range(test_loader.size):
+        for _ in range(test_loader.size):
             image, gt, name = test_loader.load_data()
             gt = np.asarray(gt, np.float32)
             gt /= (gt.max() + 1e-8)
-            image = image.to(device)
+            image = image.to(DEVICE)
 
-            pred, pred_aux = model(image)
+            pred, _ = model(image)
             pred = F.upsample(pred, size=gt.shape, mode='bilinear', align_corners=False)
             pred = pred.sigmoid()
-            threshold = torch.tensor([0.5]).to(device)
-            pred = (pred > threshold).float() * 1
-            pred = pred.data.cpu().numpy().squeeze()
-            pred = (pred - pred.min()) / (pred.max() - pred.min() + 1e-8)
-
-            imageio.imwrite(os.path.join(save_path, name),img_as_ubyte(pred))
-
-
-    # --------------------------------------------------------------------
-    # Predict GA
-    # --------------------------------------------------------------------
-    for data_name in datasetTest:
-
-        save_path = os.path.join(output_path, str(numIters).zfill(2), 'predict_GA', data_name)
-        os.makedirs(save_path, exist_ok=True)
-
-        # ----------------------------------------------------------------
-        # Load model
-        # ----------------------------------------------------------------
-        model_path = os.path.join(model_folder, 'model_GA_{}.pt'.format(data_name))
-        model = torch.load(model_path)
-        model.eval()
-
-        # ----------------------------------------------------------------
-        # Set up data
-        # ----------------------------------------------------------------
-        init_trainsize = int(config['hyparameters']['init_trainsize'])
-        test_path = os.path.join(config['dataset']['test'], data_name)
-        test_images_path = os.path.join(test_path, 'images')
-        test_masks_path = os.path.join(test_path, 'masks')
-        test_loader = TestDataset(test_images_path, test_masks_path, init_trainsize)
-
-        # ----------------------------------------------------------------
-        # Testing pipeline
-        # ----------------------------------------------------------------
-        for i in range(test_loader.size):
-            image, gt, name = test_loader.load_data()
-            gt = np.asarray(gt, np.float32)
-            gt /= (gt.max() + 1e-8)
-            image = image.to(device)
-
-            pred, pred_aux = model(image)
-            pred = F.upsample(pred, size=gt.shape, mode='bilinear', align_corners=False)
-            pred = pred.sigmoid()
-            threshold = torch.tensor([0.5]).to(device)
+            threshold = torch.tensor([0.5]).to(DEVICE)
             pred = (pred > threshold).float() * 1
             pred = pred.data.cpu().numpy().squeeze()
             pred = (pred - pred.min()) / (pred.max() - pred.min() + 1e-8)
@@ -201,6 +171,7 @@ def save_result(numIters, config, model_folder):
 
 
 def plot_result(result_lst, save_path):
+    """Plot loss after training"""
     epochs = range(1, len(result_lst) + 1)
 
     plt.figure(figsize=(10, 6))
@@ -211,15 +182,16 @@ def plot_result(result_lst, save_path):
     plt.legend()
     plt.grid(True)
 
-    # Save the plot to a file
     plt.savefig(save_path)
 
 
-def train_loop(config, numIters):
-    global device
-    global output_path
-
-    model_type = config['model']['model_backbone']
+def train_loop(config, num_iter, output_path):
+    """Train loop for 1 iteration"""
+    # --------------------------------------------------------------------
+    # Load from config
+    # --------------------------------------------------------------------
+    model_backbone_type = config['model']['model_backbone']
+    feature_fuse = config['model']['feature_fuse']
 
     n_epochs = int(config['hyparameters']['n_epochs'])
     init_lr = float(config['hyparameters']['learning_rate'])
@@ -227,50 +199,24 @@ def train_loop(config, numIters):
     batch_size = int(config['hyparameters']['batch_size'])
 
     # --------------------------------------------------------------------
-    # Setup log
-    # --------------------------------------------------------------------
-    # # Set up the logging configuration
-    # logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
-    # # Create a file handler that writes log messages to a file
-    # file_handler = logging.FileHandler(os.path.join(output_path, 'logfile_{}.log'.format(str(numIters).zfill(2))))
-    # file_handler.setLevel(logging.INFO)
-    # file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
-
-    # # Create a stream handler that writes log messages to the console
-    # stream_handler = logging.StreamHandler()
-    # stream_handler.setLevel(logging.INFO)
-    # stream_handler.setFormatter(logging.Formatter('%(levelname)s - %(message)s'))
-
-    # # Get the root logger and add the handlers
-    # logger = logging.getLogger()
-    # aiLogger.addHandler(file_handler)
-    # aiLogger.addHandler(stream_handler)
-
-    # --------------------------------------------------------------------
     # Clear GPU cache and load model
     # --------------------------------------------------------------------
     torch.cuda.empty_cache()
-    model = load_model(model_type)
-    model.to(device)
+    model = load_model(model_backbone_type, feature_fuse)
+    if torch.cuda.device_count() > 1:
+        msg = "Using", torch.cuda.device_count(), "GPUs!"
+        aiLogger.info(msg)
+    model = torch.nn.DataParallel(model)
+    model.to(DEVICE)
     lr = init_lr
-    # sigma1 = nn.Parameter(torch.tensor(1.0), requires_grad=True)
-    # sigma2 = nn.Parameter(torch.tensor(1.0), requires_grad=True)
-
-    model_optimizer = torch.optim.AdamW([
-        {'params': list(model.parameters())},
-        # {'params': [sigma1, sigma2]}
-    ], lr=lr)
-
-    # model_optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
-    scheduler = torch.optim.lr_scheduler.StepLR(model_optimizer, step_size=25, gamma=0.25)
+    model_optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
+    scheduler = torch.optim.lr_scheduler.StepLR(model_optimizer, step_size=50, gamma=0.3)
 
     # --------------------------------------------------------------------
     # Keep track of losses over time
     # --------------------------------------------------------------------
     losses = []
     coeff_max = 0
-    datasetValidation_max = [0,0,0,0,0]
 
     # --------------------------------------------------------------------
     # Set up data
@@ -278,11 +224,11 @@ def train_loop(config, numIters):
     train_path = config['dataset']['train']
     train_images_path = os.path.join(train_path, 'images')
     train_masks_path = os.path.join(train_path, 'masks')
-    trainDataset = PolypDataset(train_images_path, train_masks_path, trainsize = init_trainsize, augmentations = True)
-    train_loader = DataLoader(dataset = trainDataset, batch_size = batch_size, shuffle = True)
+    train_dataset = PolypDataset(train_images_path, train_masks_path, trainsize = init_trainsize, augmentations = True)
+    train_loader = DataLoader(dataset = train_dataset, batch_size = batch_size, shuffle = True)
 
-    iter_X = iter(train_loader)
-    steps_per_epoch = len(iter_X)
+    iter_x = iter(train_loader)
+    steps_per_epoch = len(iter_x)
     num_epoch = 0
     total_steps = (n_epochs+1)*steps_per_epoch
 
@@ -295,15 +241,15 @@ def train_loop(config, numIters):
         # Reset iterators for each epoch
         # ----------------------------------------------------------------
         if step % steps_per_epoch == 0:
-            iter_X = iter(train_loader)
+            iter_x = iter(train_loader)
             num_epoch = num_epoch + 1
 
         # ----------------------------------------------------------------
         # Compute loss in 1 step
         # ----------------------------------------------------------------
-        images, masks = next(iter_X)
-        images = images.to(device)
-        masks = masks.to(device)
+        images, masks = next(iter_x)
+        images = images.to(DEVICE)
+        masks = masks.to(DEVICE)
 
         model.zero_grad()
         out, out_aux = model(images)
@@ -312,9 +258,6 @@ def train_loop(config, numIters):
 
         loss = structure_loss(out, masks)
         loss_aux = structure_loss(out_aux, masks)
-        # total_loss = (1.0 / (2 * sigma1 ** 2)) * loss + \
-        #              (1.0 / (2 * sigma2 ** 2)) * loss_aux + \
-        #              torch.log(sigma1 * sigma2)
         total_loss = loss + loss_aux
         total_loss.backward()
         model_optimizer.step()
@@ -327,7 +270,8 @@ def train_loop(config, numIters):
             # ------------------------------------------------------------
             # Log loss of train
             losses.append(loss.item())
-            aiLogger.info('Epoch [{:5d}/{:5d}] | preliminary loss: {:6.6f} '.format(num_epoch, n_epochs, loss.item()))
+            msg = f'Epoch [{num_epoch:5d}/{n_epochs:5d}] | preliminary loss: {loss.item():6.6f} '
+            aiLogger.info(msg)
 
             # ------------------------------------------------------------
             # Update lr
@@ -335,49 +279,38 @@ def train_loop(config, numIters):
 
             # ------------------------------------------------------------
             # Log loss of valid
-            validation_coeff, datasetValidation = evaluate(config, model)
-            aiLogger.info('Epoch [{:5d}/{:5d}] | validation coeffient: {:6.6f} '.format(num_epoch, n_epochs, validation_coeff))
+            validation_coeff, _ = evaluate(config, model)
+            msg = f'Epoch [{num_epoch:5d}/{n_epochs:5d}] | validation coeffient: {validation_coeff:6.6f}'
+            aiLogger.info(msg)
 
             # ------------------------------------------------------------
-            # Save model PB if get better validation
+            # Save model if get better validation
             if coeff_max < validation_coeff:
                 coeff_max = validation_coeff
 
-                save_model_folder = os.path.join(output_path, str(numIters).zfill(2))
+                save_model_folder = os.path.join(output_path, str(num_iter).zfill(2))
                 os.makedirs(save_model_folder, exist_ok=True)
                 save_model_path = os.path.join(save_model_folder, 'model_PB.pt')
                 torch.save(model, save_model_path)
-                aiLogger.info('Save Average Optimized Model at Epoch [{:5d}/{:5d}]'.format(num_epoch, n_epochs))
+                msg = f'Save Average Optimized Model at Epoch [{num_epoch:5d}/{n_epochs:5d}]'
+                aiLogger.info(msg)
 
+    # --------------------------------------------------------------------
+    # End training this iter - Save result
+    # --------------------------------------------------------------------
+    save_result(num_iter, config, save_model_folder, output_path)
 
-            # ------------------------------------------------------------
-            # Save model GA if get better datasetValidation
-            for dataset_index, dataset_name in enumerate(datasetTest):
-                if datasetValidation_max[dataset_index] < datasetValidation[dataset_index]:
-                    datasetValidation_max[dataset_index] = datasetValidation[dataset_index]
-
-                    save_model_folder = os.path.join(output_path, str(numIters).zfill(2))
-                    os.makedirs(save_model_folder, exist_ok=True)
-                    save_model_path = os.path.join(save_model_folder, 'model_GA_{}.pt'.format(dataset_name))
-                    torch.save(model, save_model_path)
-                    aiLogger.info('Save Optimized {} Model at Epoch [{:5d}/{:5d}, with coefficient: {:6.6f}]'
-                                .format(dataset_name, num_epoch, n_epochs, datasetValidation[dataset_index]))
-
-
-
-    save_result(numIters, config, save_model_folder)
-    loss_path = os.path.join(output_path, 'loss_{}.png'.format(str(numIters)).zfill(2))
+    loss_path = os.path.join(output_path, f'loss_{str(num_iter).zfill(2)}.png')
     plot_result(losses, loss_path)
+
     return losses, coeff_max
 
 
 def train_repeats(config, output_dir):
     """Train pipeline 1 repeat"""
-    global device
-    global output_path
-
     model_name = config['model']['model_name']
     repeats = int(config['hyparameters']['repeats'])
+
     # --------------------------------------------------------------------
     # Prepare folder
     # --------------------------------------------------------------------
@@ -390,26 +323,15 @@ def train_repeats(config, output_dir):
     # Repeats pipline
     # --------------------------------------------------------------------
     for i in range(repeats):
-        losses, coeff_max = train_loop(config, i+1)
+        _, _ = train_loop(config, i+1, output_path)
 
 
 def main():
+    """Main function"""
+    msg = f'Available DEVICE {DEVICE}'
+    aiLogger.info(msg)
+
     args = parse_args()
-
-    global device
-    global config
-    global datasetTest
-
-    if args.type == 'PB':
-        datasetTest = ['Kvasir', 'CVC-ColonDB', 'CVC-ClinicDB', 'ETIS-LaribPolypDB', 'CVC-300']
-    else: # GA
-        datasetTest = ['CVC-ColonDB', 'ETIS-LaribPolypDB']
-
-
-    if torch.cuda.is_available():
-        device = torch.device("cuda:" + str(args.device))
-    else:
-        device = torch.device("cpu")
 
     with open(args.config, 'r', encoding='utf-8') as config_file:
         config = yaml.safe_load(config_file)

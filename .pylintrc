@@ -2,4 +2,4 @@
 max-line-length=150
 
 [MESSAGES CONTROL]
-disable=too-many-locals, too-many-instance-attributes, too-many-arguments
+disable=too-many-locals, too-many-instance-attributes, too-many-arguments, no-member, C0413, wrong-import-order

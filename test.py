@@ -3,7 +3,7 @@ import torch.nn.functional as F
 from torch import nn
 from mmcv.cnn import ConvModule
 
-from FFESNet.models.FFESNet import FFESNet
+from FFESNet.model.FFESNet import FFESNet
 
 def main():
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")

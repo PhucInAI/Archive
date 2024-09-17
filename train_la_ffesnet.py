@@ -1,5 +1,7 @@
+"""Train FFESNet"""
+
+
 import os
-import glob
 import shutil
 import argparse
 import yaml
@@ -12,12 +14,9 @@ import imageio
 from skimage import img_as_ubyte
 import matplotlib.pyplot as plt
 
-from FFESNet.models.model import Model
+from FFESNet.model.model_based_mit import ModelBasedMit
 from FFESNet.utils.dataset import PolypDataset, TestDataset
 from FFESNet.utils.ai_logger import aiLogger
-
-import warnings
-warnings.filterwarnings("ignore")
 
 
 def parse_args():
@@ -25,7 +24,6 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Arguments of Learning Ability training pipeline')
 
     parser.add_argument('--config', '-c', type=str, required=True       , help='Path of the config file')
-    parser.add_argument('--device', '-d', type=int, required=True       , help='Device to use')
     parser.add_argument('--output', '-o', type=str, default='./runs'    , help='Path of ouput folder')
     parser.add_argument('--name'  , '-n', type=str, default=''          , help='Name of output model')
 
@@ -34,31 +32,13 @@ def parse_args():
     return args
 
 
-# pylint: disable=import-outside-toplevel
-def load_loss(loss_name):
-    """Load loss function"""
-
-    if loss_name == 'structure':
-        from FFESNet.utils.losses.structure_loss import structure_loss as loss_function
-    elif loss_name == 'dice_bce':
-        from FFESNet.utils.losses.dice_bce_loss import dice_bce_loss as loss_function
-    elif loss_name == 'tversky':
-        from FFESNet.utils.losses.tversky_loss import tversky_loss as loss_function
-    elif loss_name == 'tversky_bce':
-        from FFESNet.utils.losses.tversky_bce_loss import tversky_bce_loss as loss_function
-    elif loss_name == 'sufl':
-        from FFESNet.utils.losses.loss_classes import SymmetricUnifiedFocalLoss
-        loss_function = SymmetricUnifiedFocalLoss()
-    else:
-        print('Do not know loss name')
-        exit()
-
-    return loss_function
-
-
-def load_model(model_type):
+def load_model(model_backbone_type, feature_fuse, prediction='linear'):
     """Load model"""
-    model = Model(model_type=model_type)
+    model = ModelBasedMit(
+                            model_backbone_type=model_backbone_type,
+                            feature_fuse=feature_fuse,
+                            prediction=prediction
+                         )
 
     return model
 

@@ -8,6 +8,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
+
 def autopad(k, p=None, d=1):  # kernel, padding, dilation
     """Pad to `same` outputs"""
     if d > 1:
@@ -15,6 +16,11 @@ def autopad(k, p=None, d=1):  # kernel, padding, dilation
     if p is None:
         p = k // 2 if isinstance(k, int) else [x // 2 for x in k]  # auto-pad
     return p
+
+
+# ########################################################################
+# CB Net
+# ########################################################################
 
 
 class CBLinear(nn.Module):
@@ -27,22 +33,32 @@ class CBLinear(nn.Module):
     def forward(self, x):
         """Forward function"""
         outs = self.conv(x).split(self.c2s, dim=1)
+
         return outs
 
+
 class CBFuse(nn.Module):
+    """CB Fuse"""
     def __init__(self, idx):
-        super(CBFuse, self).__init__()
+        super().__init__()
         self.idx = idx
 
     def forward(self, xs):
+        """Forward function"""
         target_size = xs[-1].shape[2:]
         res = [F.interpolate(x[self.idx[i]], size=target_size, mode='nearest') for i, x in enumerate(xs[:-1])]
         out = torch.sum(torch.stack(res + xs[-1:]), dim=0)
+
         return out
 
+
+# ########################################################################
+# CSP Block
+# ########################################################################
+
+
 class Conv(nn.Module):
-    """Custom Conv block"""
-    # Standard convolution with args(ch_in, ch_out, kernel, stride, padding, groups, dilation, activation)
+    """Standard convolution with args(ch_in, ch_out, kernel, stride, padding, groups, dilation, activation)"""
     default_act = nn.SiLU()  # default activation
 
     def __init__(self, c1, c2, k=1, s=1, p=None, g=1, d=1, act=True):
@@ -59,13 +75,15 @@ class Conv(nn.Module):
         """Forward function without batchnorm"""
         return self.act(self.conv(x))
 
+
 class RepConvN(nn.Module):
-    """RepConv is a basic rep-style block, including training and deploy status
+    """
+    RepConv is a basic rep-style block, including training and deploy status
     This code is based on https://github.com/DingXiaoH/RepVGG/blob/main/repvgg.py
     """
     default_act = nn.SiLU()  # default activation
 
-    def __init__(self, c1, c2, k=3, s=1, p=1, g=1, d=1, act=True, bn=False, deploy=False):
+    def __init__(self, c1, c2, k=3, s=1, p=1, g=1, act=True):
         super().__init__()
         assert k == 3 and p == 1
         self.g = g
@@ -83,10 +101,11 @@ class RepConvN(nn.Module):
 
     def forward(self, x):
         """Forward process"""
-        id_out = 0 if self.bn is None else self.bn(x)
+        id_out = 0 if self.bn is None else self.bn(x) # pylint: disable=not-callable
         return self.act(self.conv1(x) + self.conv2(x) + id_out)
 
     def get_equivalent_kernel_bias(self):
+        """Get equivalent kernel bias"""
         kernel3x3, bias3x3 = self._fuse_bn_tensor(self.conv1)
         kernel1x1, bias1x1 = self._fuse_bn_tensor(self.conv2)
         kernelid, biasid = self._fuse_bn_tensor(self.bn)
@@ -105,7 +124,7 @@ class RepConvN(nn.Module):
         if kernel1x1 is None:
             return 0
         else:
-            return torch.nn.functional.pad(kernel1x1, [1, 1, 1, 1])
+            return torch.nn.functional.pad(kernel1x1, [1, 1, 1, 1]) # pylint: disable=not-callable
 
     def _fuse_bn_tensor(self, branch):
         if branch is None:
@@ -123,7 +142,7 @@ class RepConvN(nn.Module):
                 kernel_value = np.zeros((self.c1, input_dim, 3, 3), dtype=np.float32)
                 for i in range(self.c1):
                     kernel_value[i, i % input_dim, 1, 1] = 1
-                self.id_tensor = torch.from_numpy(kernel_value).to(branch.weight.device)
+                self.id_tensor = torch.from_numpy(kernel_value).to(branch.weight.device) # pylint: disable=W0201
             kernel = self.id_tensor
             running_mean = branch.running_mean
             running_var = branch.running_var
@@ -134,7 +153,9 @@ class RepConvN(nn.Module):
         t = (gamma / std).reshape(-1, 1, 1, 1)
         return kernel * t, beta - running_mean * gamma / std
 
+    # pylint: disable=W0201, C2801
     def fuse_convs(self):
+        """Fuse convs"""
         if hasattr(self, 'conv'):
             return
         kernel, bias = self.get_equivalent_kernel_bias()
@@ -159,6 +180,7 @@ class RepConvN(nn.Module):
         if hasattr(self, 'id_tensor'):
             self.__delattr__('id_tensor')
 
+
 class RepNBottleneck(nn.Module):
     """Standard bottleneck"""
     def __init__(self, c1, c2, shortcut=True, g=1, k=(3, 3), e=0.5):  # ch_in, ch_out, shortcut, kernels, groups, expand
@@ -169,7 +191,9 @@ class RepNBottleneck(nn.Module):
         self.add = shortcut and c1 == c2
 
     def forward(self, x):
+        """Forward function"""
         return x + self.cv2(self.cv1(x)) if self.add else self.cv2(self.cv1(x))
+
 
 class RepNCSP(nn.Module):
     """CSP Bottleneck with 3 convolutions"""
@@ -182,6 +206,7 @@ class RepNCSP(nn.Module):
         self.m = nn.Sequential(*(RepNBottleneck(c_, c_, shortcut, g, e=1.0) for _ in range(n)))
 
     def forward(self, x):
+        """Forward function"""
         return self.cv3(torch.cat((self.m(self.cv1(x)), self.cv2(x)), 1))
 
 class RepNCSPELAN4(nn.Module):
@@ -195,17 +220,25 @@ class RepNCSPELAN4(nn.Module):
         self.cv4 = Conv(c3+(2*c4), c2, 1, 1)
 
     def forward(self, x):
+        """Forward function"""
         y = list(self.cv1(x).chunk(2, 1))
         y.extend((m(y[-1])) for m in [self.cv2, self.cv3])
         return self.cv4(torch.cat(y, 1))
 
     def forward_split(self, x):
+        """Forward function split?"""
         y = list(self.cv1(x).split((self.c, self.c), 1))
         y.extend(m(y[-1]) for m in [self.cv2, self.cv3])
         return self.cv4(torch.cat(y, 1))
-    
+
+
+# ########################################################################
+# Conv Blocks to down size
+# ########################################################################
+
 
 class ADown(nn.Module):
+    """Conv Blocks to down size"""
     def __init__(self, c1, c2):  # ch_in, ch_out, shortcut, kernels, groups, expand
         super().__init__()
         self.c = c2 // 2
@@ -213,7 +246,8 @@ class ADown(nn.Module):
         self.cv2 = Conv(c1 // 2, self.c, 1, 1, 0)
 
     def forward(self, x):
-        x = torch.nn.functional.avg_pool2d(x, 2, 1, 0, False, True)
+        """Forward function"""
+        x = torch.nn.functional.avg_pool2d(x, 2, 1, 0, False, True) # pylint: disable=not-callable
         x1,x2 = x.chunk(2, 1)
         x1 = self.cv1(x1)
         x2 = torch.nn.functional.max_pool2d(x2, 3, 2, 1)

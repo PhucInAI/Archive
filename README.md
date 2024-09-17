@@ -6,9 +6,23 @@ LJMU thesis work, focus on medical segmentation with ViTs
     conda create -n FFESNet python=3.10 ipython
     conda activate FFESNet
 
-    pip install torch==2.0.0 torchvision==0.15.1 torchaudio==2.0.1 --index-url https://download.pytorch.org/whl/cu118
+    conda install pytorch==2.3.1 torchvision==0.18.1 torchaudio==2.3.1 pytorch-cuda=11.8 -c pytorch -c nvidia
     pip install timm
-    pip install mmcv==2.1.0 -f https://download.openmmlab.com/mmcv/dist/cu118/torch2.0/index.html
-    pip install matplotlib seaborn scikit-learn scikit-image jupyter 
+    pip install mmcv==2.2.0 -f https://download.openmmlab.com/mmcv/dist/cu118/torch2.3/index.html
+    pip install matplotlib seaborn scikit-learn scikit-image jupyter
     pip install tensorflow==2.14.0
+
+    git clone git@github.com:state-spaces/mamba.git
+    cd mamba
+    pip install --no-build-isolation .
+    cd ..
+
+    git@github.com:NVlabs/MambaVision.git
+    cd MambaVision
+    # In setup.py, edit install_requires to `install_requires=['torch >= 2.1.2', 'timm', 'einops'],`
+    pip install .
+    cd ..
+
+    pip install mambavision
+    pip install -e .
 ```

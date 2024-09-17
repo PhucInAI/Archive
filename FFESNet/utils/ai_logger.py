@@ -89,7 +89,7 @@ class CustomFormatter(logging.Formatter):
 # ========================================================================
 # Set up global logger object
 # ========================================================================
-def set_up_ai_logger(name="OCR_system_log", save_log_dir = '"./ai_log_file.log"'):
+def set_up_ai_logger(name="train_log", save_log_dir = './train_la_CVC-ClinicDB.log'):
     """Set up global logger object"""
     # --------------------------------------------------------------------
     # Create new logger
@@ -99,14 +99,14 @@ def set_up_ai_logger(name="OCR_system_log", save_log_dir = '"./ai_log_file.log"'
     # --------------------------------------------------------------------
     # Set up handler
     # --------------------------------------------------------------------
-    # file_handler = logging.handlers.RotatingFileHandler(
-    #                                                         save_log_dir,
-    #                                                         maxBytes=10485760,
-    #                                                         backupCount=300,
-    #                                                         encoding="utf-8",
-    #                                                     )
-    # file_handler.setFormatter(CustomFormatter())
-    # logger.addHandler(file_handler)
+    file_handler = logging.handlers.RotatingFileHandler(
+                                                            save_log_dir,
+                                                            maxBytes=10485760,
+                                                            backupCount=300,
+                                                            encoding="utf-8",
+                                                        )
+    file_handler.setFormatter(CustomFormatter())
+    logger.addHandler(file_handler)
 
     # --------------------------------------------------------------------
     # For console
