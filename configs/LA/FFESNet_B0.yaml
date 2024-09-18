@@ -1,0 +1,14 @@
+dataset : /home/ptn/Storage/Research/FFESNet/data/LA
+
+model:
+  model_name      : 'FFESNet_B0'
+  model_backbone  : 'B0'
+  feature_fuse    : 'CSP'
+
+hyparameters:
+  init_trainsize  : 352
+  batch_size      : 64
+  repeats         : 1
+  n_epochs        : 150
+  learning_rate   : 1e-4
+  drop_rate       : 0.2

@@ -20,10 +20,11 @@ from FFESNet.utils.ai_logger import aiLogger
 
 class ModelBasedMit(nn.Module):
     """Model defined based on MixTransformer"""
-    def __init__(self, model_backbone_type = 'B0', feature_fuse='LP', prediction='linear'):
+    def __init__(self, model_backbone_type = 'B0', feature_fuse='LP', prediction='linear', mode='inferene'):
         """Init function"""
         super().__init__()
         self.model_backbone_type = model_backbone_type
+        self.mode = mode
 
 
         # ################################################################
@@ -174,94 +175,95 @@ class ModelBasedMit(nn.Module):
                                         kernel_size=1
                                     )
 
+        if self.mode == 'train':
 
-        # ################################################################
-        # Auxiliary branch
-        # ################################################################
+            # ################################################################
+            # Auxiliary branch
+            # ################################################################
 
 
-        # ----------------------------------------------------------------
-        # Rout from main branch
-        # ----------------------------------------------------------------
-        self.rout1 = CBLinear(
-                                self.backbone.embed_dims[1],
-                                [
-                                    self.backbone.embed_dims[1]
-                                ]
-                             )
-        self.rout2 = CBLinear(
-                                self.backbone.embed_dims[2],
-                                [
+            # ----------------------------------------------------------------
+            # Rout from main branch
+            # ----------------------------------------------------------------
+            self.rout1 = CBLinear(
                                     self.backbone.embed_dims[1],
-                                    self.backbone.embed_dims[2]
-                                ]
-                             )
-        self.rout3 = CBLinear(
-                                self.backbone.embed_dims[3],
-                                [
-                                    self.backbone.embed_dims[1],
+                                    [
+                                        self.backbone.embed_dims[1]
+                                    ]
+                                )
+            self.rout2 = CBLinear(
                                     self.backbone.embed_dims[2],
-                                    self.backbone.embed_dims[3]
-                                ]
-                             )
-
-        # ----------------------------------------------------------------
-        # Fast downscale from input
-        # ----------------------------------------------------------------
-        self.aux_conv1 = Conv(3, self.backbone.embed_dims[0], 3, 2)
-        self.aux_conv2 = Conv(self.backbone.embed_dims[0], self.backbone.embed_dims[1], 3, 2)
-
-        # ----------------------------------------------------------------
-        # ELAN blocks
-        # ----------------------------------------------------------------
-        self.elan1 = RepNCSPELAN4(
-                                    self.backbone.embed_dims[1],
-                                    self.backbone.embed_dims[1],
-                                    self.backbone.embed_dims[0],
-                                    self.backbone.embed_dims[0]//2,
-                                    1
-                                 )
-        self.adown1 = ADown(self.backbone.embed_dims[1], self.backbone.embed_dims[1])
-        self.cbfuse1 = CBFuse([0, 0, 0])
-
-        self.elan2 = RepNCSPELAN4(
-                                    self.backbone.embed_dims[1],
-                                    self.backbone.embed_dims[2],
-                                    self.backbone.embed_dims[1],
-                                    self.backbone.embed_dims[0],
-                                    1
-                                 )
-        self.adown2 = ADown(self.backbone.embed_dims[2], self.backbone.embed_dims[2])
-        self.cbfuse2 = CBFuse([1, 1])
-
-        self.elan3 = RepNCSPELAN4(
-                                    self.backbone.embed_dims[2],
+                                    [
+                                        self.backbone.embed_dims[1],
+                                        self.backbone.embed_dims[2]
+                                    ]
+                                )
+            self.rout3 = CBLinear(
                                     self.backbone.embed_dims[3],
-                                    self.backbone.embed_dims[2],
-                                    self.backbone.embed_dims[1],
-                                    1
-                                 )
-        self.adown3 = ADown(self.backbone.embed_dims[3], self.backbone.embed_dims[3])
-        self.cbfuse3 = CBFuse([2])
+                                    [
+                                        self.backbone.embed_dims[1],
+                                        self.backbone.embed_dims[2],
+                                        self.backbone.embed_dims[3]
+                                    ]
+                                )
 
-        self.elan4 = RepNCSPELAN4(
-                                    self.backbone.embed_dims[3],
-                                    self.backbone.embed_dims[3],
-                                    self.backbone.embed_dims[2],
-                                    self.backbone.embed_dims[1],
-                                    1
-                                 )
+            # ----------------------------------------------------------------
+            # Fast downscale from input
+            # ----------------------------------------------------------------
+            self.aux_conv1 = Conv(3, self.backbone.embed_dims[0], 3, 2)
+            self.aux_conv2 = Conv(self.backbone.embed_dims[0], self.backbone.embed_dims[1], 3, 2)
 
-        # ----------------------------------------------------------------
-        # Prediction of auxiliary branch
-        # ----------------------------------------------------------------
-        self.linear_pred_aux = nn.Conv2d(
-                                            self.backbone.embed_dims[1] +\
-                                            self.backbone.embed_dims[2] +\
-                                            self.backbone.embed_dims[3]*2,
-                                            1,
-                                            kernel_size=1
-                                        )
+            # ----------------------------------------------------------------
+            # ELAN blocks
+            # ----------------------------------------------------------------
+            self.elan1 = RepNCSPELAN4(
+                                        self.backbone.embed_dims[1],
+                                        self.backbone.embed_dims[1],
+                                        self.backbone.embed_dims[0],
+                                        self.backbone.embed_dims[0]//2,
+                                        1
+                                    )
+            self.adown1 = ADown(self.backbone.embed_dims[1], self.backbone.embed_dims[1])
+            self.cbfuse1 = CBFuse([0, 0, 0])
+
+            self.elan2 = RepNCSPELAN4(
+                                        self.backbone.embed_dims[1],
+                                        self.backbone.embed_dims[2],
+                                        self.backbone.embed_dims[1],
+                                        self.backbone.embed_dims[0],
+                                        1
+                                    )
+            self.adown2 = ADown(self.backbone.embed_dims[2], self.backbone.embed_dims[2])
+            self.cbfuse2 = CBFuse([1, 1])
+
+            self.elan3 = RepNCSPELAN4(
+                                        self.backbone.embed_dims[2],
+                                        self.backbone.embed_dims[3],
+                                        self.backbone.embed_dims[2],
+                                        self.backbone.embed_dims[1],
+                                        1
+                                    )
+            self.adown3 = ADown(self.backbone.embed_dims[3], self.backbone.embed_dims[3])
+            self.cbfuse3 = CBFuse([2])
+
+            self.elan4 = RepNCSPELAN4(
+                                        self.backbone.embed_dims[3],
+                                        self.backbone.embed_dims[3],
+                                        self.backbone.embed_dims[2],
+                                        self.backbone.embed_dims[1],
+                                        1
+                                    )
+
+            # ----------------------------------------------------------------
+            # Prediction of auxiliary branch
+            # ----------------------------------------------------------------
+            self.linear_pred_aux = nn.Conv2d(
+                                                self.backbone.embed_dims[1] +\
+                                                self.backbone.embed_dims[2] +\
+                                                self.backbone.embed_dims[3]*2,
+                                                1,
+                                                kernel_size=1
+                                            )
 
 
     def _init_weights(self):
@@ -390,41 +392,44 @@ class ModelBasedMit(nn.Module):
         # Auxiliary branch
         # ################################################################
 
+        if self.mode == 'train':
+            aux_rout1 = self.rout1(out_2)
+            aux_rout2 = self.rout2(out_3)
+            aux_rout3 = self.rout3(out_4)
 
-        aux_rout1 = self.rout1(out_2)
-        aux_rout2 = self.rout2(out_3)
-        aux_rout3 = self.rout3(out_4)
+            aux_out = self.aux_conv1(x)
+            aux_out = self.aux_conv2(aux_out)
 
-        aux_out = self.aux_conv1(x)
-        aux_out = self.aux_conv2(aux_out)
+            aux_out = self.elan1(aux_out)
+            aux_out1 = aux_out
+            aux_out = self.adown1(aux_out)
+            aux_out = self.cbfuse1([aux_rout1, aux_rout2, aux_rout3, aux_out])
 
-        aux_out = self.elan1(aux_out)
-        aux_out1 = aux_out
-        aux_out = self.adown1(aux_out)
-        aux_out = self.cbfuse1([aux_rout1, aux_rout2, aux_rout3, aux_out])
+            aux_out = self.elan2(aux_out)
+            aux_out2 = aux_out
+            aux_out = self.adown2(aux_out)
+            aux_out = self.cbfuse2([aux_rout2, aux_rout3, aux_out])
 
-        aux_out = self.elan2(aux_out)
-        aux_out2 = aux_out
-        aux_out = self.adown2(aux_out)
-        aux_out = self.cbfuse2([aux_rout2, aux_rout3, aux_out])
+            aux_out = self.elan3(aux_out)
+            aux_out3 = aux_out
+            aux_out = self.adown3(aux_out)
+            aux_out = self.cbfuse3([aux_rout3, aux_out])
 
-        aux_out = self.elan3(aux_out)
-        aux_out3 = aux_out
-        aux_out = self.adown3(aux_out)
-        aux_out = self.cbfuse3([aux_rout3, aux_out])
+            aux_out = self.elan4(aux_out)
+            aux_out4 = aux_out
 
-        aux_out = self.elan4(aux_out)
-        aux_out4 = aux_out
+            aux_out4 = F.interpolate(aux_out4,scale_factor=8,mode='bilinear', align_corners=False)
+            aux_out3 = F.interpolate(aux_out3,scale_factor=4,mode='bilinear', align_corners=False)
+            aux_out2 = F.interpolate(aux_out2,scale_factor=2,mode='bilinear', align_corners=False)
+            aux_out1 = F.interpolate(aux_out1,scale_factor=1,mode='bilinear', align_corners=False)
 
-        aux_out4 = F.interpolate(aux_out4,scale_factor=8,mode='bilinear', align_corners=False)
-        aux_out3 = F.interpolate(aux_out3,scale_factor=4,mode='bilinear', align_corners=False)
-        aux_out2 = F.interpolate(aux_out2,scale_factor=2,mode='bilinear', align_corners=False)
-        aux_out1 = F.interpolate(aux_out1,scale_factor=1,mode='bilinear', align_corners=False)
+            aux_out = self.linear_pred_aux(torch.cat([aux_out1, aux_out2, aux_out3, aux_out4], dim=1))
+            aux_out = F.interpolate(aux_out, scale_factor=4, mode='bilinear', align_corners=False)
 
-        aux_out = self.linear_pred_aux(torch.cat([aux_out1, aux_out2, aux_out3, aux_out4], dim=1))
-        aux_out = F.interpolate(aux_out, scale_factor=4, mode='bilinear', align_corners=False)
+            return out, aux_out
 
-        return out, aux_out
+        else:
+            return out
 
 
 def main():

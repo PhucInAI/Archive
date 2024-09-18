@@ -2,12 +2,14 @@
 
 
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+import glob
 import shutil
 import argparse
 import yaml
 import numpy as np
+from tqdm import tqdm
 import torch
+# torch.backends.cudnn.enabled = False
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 import imageio
@@ -16,15 +18,31 @@ from skimage import img_as_ubyte
 import matplotlib.pyplot as plt
 
 from FFESNet.model.model_based_mit import ModelBasedMit
-from FFESNet.model.model_based_mamba import ModelBasedMamba
 from FFESNet.utils.dataset import PolypDataset, TestDataset
-from FFESNet.utils.losses.structure_loss import structure_loss
+from FFESNet.utils.loss import SemanticLossFunctions
+from FFESNet.utils.metric import calculate_image_pair
 from FFESNet.utils.ai_logger import aiLogger
 
 import warnings
 warnings.filterwarnings("ignore")
 
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+# DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# DEVICE = torch.device("cpu")
+global DEVICE # pylint: disable=W0604
+DATASET_LST = ['Kvasir-SEG', 'CVC-ColonDB', 'CVC-ClinicDB', 'ETIS-LaribPolypDB']
+LOSS_LST =  [
+                # 'weighted_cross_entropy_loss',
+                # 'focal_loss',
+                # 'dice_loss',
+                # 'bce_dice_loss',
+                # 'tversky_loss',
+                'log_cosh_dice_loss',
+                'jacard_loss',
+                'ssim_loss',
+                'unet3p_hybrid_loss',
+                'basnet_hybrid_loss',
+            ]
 
 
 def parse_args():
@@ -32,33 +50,55 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Arguments of General training pipeline')
 
     parser.add_argument('--config', '-c', type=str, required=True       , help='Path of the config file')
-    parser.add_argument('--output', '-o', type=str, default='./runs'    , help='Path of ouput folder')
-    parser.add_argument('--type'  , '-t', type=str, default='PB'        , help='Type of training, PB or GA')
+    parser.add_argument('--device', '-d', type=int, default=0           , help='Device to run model')
+    parser.add_argument('--output', '-o', type=str, default='./runs/LA/', help='Path of ouput folder')
+    parser.add_argument('--loss'  , '-l', type=str, default='all'       , help='Type of loss')
     args = parser.parse_args()
 
     return args
 
 
-def load_model(model_backbone_type, feature_fuse, prediction='linear'):
-    """Load model"""
-    if model_backbone_type in ['B0', 'B1', 'B2', 'B3', 'B4']:
-        model = ModelBasedMit(
-                                model_backbone_type=model_backbone_type,
-                                feature_fuse=feature_fuse,
-                                prediction=prediction,
-                             )
-    elif model_backbone_type in ['T', 'T2', 'S', 'B', 'L', 'L2']:
-        model = ModelBasedMamba(
-                                model_backbone_type=model_backbone_type,
-                                feature_fuse=feature_fuse,
-                                prediction=prediction,
-                               )
+def loss_function(y_true, y_pred, loss_type):
+    """Ccmpute loss based on loss type"""
+    loss_obj = SemanticLossFunctions()
+    match loss_type:
+        case 'weighted_cross_entropy_loss':
+            loss = loss_obj.weighted_cross_entropy_loss(y_true, y_pred)
+        case 'focal_loss':
+            loss = loss_obj.focal_loss(y_true, y_pred)
+        case 'dice_loss':
+            loss = loss_obj.dice_loss(y_true, y_pred)
+        case 'bce_dice_loss':
+            loss = loss_obj.bce_dice_loss(y_true, y_pred)
+        case 'tversky_loss':
+            loss = loss_obj.tversky_loss(y_true, y_pred)
+        case 'log_cosh_dice_loss':
+            loss = loss_obj.log_cosh_dice_loss(y_true, y_pred)
+        case 'jacard_loss':
+            loss = loss_obj.jacard_loss(y_true, y_pred)
+        case 'ssim_loss':
+            loss = loss_obj.ssim_loss(y_true, y_pred)
+        case 'unet3p_hybrid_loss':
+            loss = loss_obj.unet3p_hybrid_loss(y_true, y_pred)
+        case 'basnet_hybrid_loss':
+            loss = loss_obj.basnet_hybrid_loss(y_true, y_pred)
 
+    return loss
+
+
+def load_model(model_backbone_type, feature_fuse, prediction='linear', mode='inference'):
+    """Load model"""
+    model = ModelBasedMit(
+                            model_backbone_type=model_backbone_type,
+                            feature_fuse=feature_fuse,
+                            prediction=prediction,
+                            mode=mode
+                            )
     return model
 
 
-def evaluate(config, model): # pylint: disable = W0621
-    """Evaluate model"""
+def evaluate(config, model, dataset): # pylint: disable = W0621
+    """Evaluate model"""    
     # --------------------------------------------------------------------
     # Switch model to eval mode and init output
     # --------------------------------------------------------------------
@@ -72,7 +112,7 @@ def evaluate(config, model): # pylint: disable = W0621
     # Set up data
     # --------------------------------------------------------------------
     init_trainsize = int(config['hyparameters']['init_trainsize'])
-    val_path = config['dataset']['valid']
+    val_path = os.path.join(config['dataset'], dataset, 'validation')
     val_images_path = os.path.join(val_path, 'images')
     val_masks_path = os.path.join(val_path, 'masks')
     val_loader = TestDataset(val_images_path,val_masks_path, init_trainsize)
@@ -117,7 +157,7 @@ def evaluate(config, model): # pylint: disable = W0621
     return val/count
 
 
-def save_result(num_iter, config, model_path, output_path):
+def save_result(num_iter, config, model_path, dataset, output_path):
     """Save result (predicted image)"""
     save_path = os.path.join(output_path, str(num_iter).zfill(2), 'predict')
     os.makedirs(save_path, exist_ok=True)
@@ -125,14 +165,14 @@ def save_result(num_iter, config, model_path, output_path):
     # --------------------------------------------------------------------
     # Load model
     # --------------------------------------------------------------------
-    model = torch.load(model_path)
+    model = torch.load(model_path).to(DEVICE)
     model.eval()
 
     # --------------------------------------------------------------------
     # Set up data
     # --------------------------------------------------------------------
     init_trainsize = int(config['hyparameters']['init_trainsize'])
-    test_path = config['dataset']['test']
+    test_path = os.path.join(config['dataset'], dataset, 'test')
     test_images_path = os.path.join(test_path, 'images')
     test_masks_path = os.path.join(test_path, 'masks')
     test_loader = TestDataset(test_images_path, test_masks_path, init_trainsize)
@@ -147,7 +187,7 @@ def save_result(num_iter, config, model_path, output_path):
         gt /= (gt.max() + 1e-8)
         image = image.to(DEVICE)
 
-        pred, _ = model(image)
+        pred = model(image)
         pred = F.upsample(pred, size=gt.shape, mode='bilinear', align_corners=False)
         pred = pred.sigmoid()
         threshold = torch.tensor([0.5]).to(DEVICE)
@@ -173,7 +213,7 @@ def plot_result(result_lst, save_path):
     plt.savefig(save_path)
 
 
-def train_loop(config, num_iter, output_path):
+def train_loop(config, num_iter, output_path, dataset, loss_type):
     """Train loop for 1 iteration"""
     # --------------------------------------------------------------------
     # Load from config
@@ -190,11 +230,7 @@ def train_loop(config, num_iter, output_path):
     # Clear GPU cache and load model
     # --------------------------------------------------------------------
     torch.cuda.empty_cache()
-    model = load_model(model_backbone_type, feature_fuse)
-    if torch.cuda.device_count() > 1:
-        msg = "Using", torch.cuda.device_count(), "GPUs!"
-        aiLogger.info(msg)
-    model = torch.nn.DataParallel(model)
+    model = load_model(model_backbone_type, feature_fuse, mode='train')
     model.to(DEVICE)
     lr = init_lr
     model_optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
@@ -209,7 +245,7 @@ def train_loop(config, num_iter, output_path):
     # --------------------------------------------------------------------
     # Set up data
     # --------------------------------------------------------------------
-    train_path = config['dataset']['train']
+    train_path = os.path.join(config['dataset'], dataset, 'train')
     train_images_path = os.path.join(train_path, 'images')
     train_masks_path = os.path.join(train_path, 'masks')
     train_dataset = PolypDataset(train_images_path, train_masks_path, trainsize = init_trainsize, augmentations = True)
@@ -243,9 +279,11 @@ def train_loop(config, num_iter, output_path):
         out, out_aux = model(images)
         out = F.interpolate(out, size=masks.shape[2:], mode='bilinear', align_corners=False)
         out_aux = F.interpolate(out_aux, size=masks.shape[2:], mode='bilinear', align_corners=False)
+        out = out.sigmoid()
+        out_aux = out_aux.sigmoid()
 
-        loss = structure_loss(out, masks)
-        loss_aux = structure_loss(out_aux, masks)
+        loss = loss_function(masks, out, loss_type)
+        loss_aux = loss_function(masks, out_aux, loss_type)
         total_loss = loss + loss_aux
         total_loss.backward()
         model_optimizer.step()
@@ -267,7 +305,7 @@ def train_loop(config, num_iter, output_path):
 
             # ------------------------------------------------------------
             # Log loss of valid
-            validation_coeff = evaluate(config, model)
+            validation_coeff = evaluate(config, model, dataset)
             msg = f'Epoch [{num_epoch:5d}/{n_epochs:5d}] | validation coeffient: {validation_coeff:6.6f}'
             aiLogger.info(msg)
 
@@ -278,23 +316,70 @@ def train_loop(config, num_iter, output_path):
 
                 save_model_folder = os.path.join(output_path, str(num_iter).zfill(2))
                 os.makedirs(save_model_folder, exist_ok=True)
-                save_model_path = os.path.join(save_model_folder, f'model_{num_iter}_{num_epoch}.pt')
+
+                # Save all branch
+                save_model_path = os.path.join(save_model_folder, 'model_all.pt')
                 torch.save(model, save_model_path)
-                msg = f'Save Average Optimized Model at Epoch [{num_epoch:5d}/{n_epochs:5d}]'
+
+                # Save only inference brach
+                save_model_path = os.path.join(save_model_folder, 'model.pt')
+                torch.save(model.state_dict(), save_model_path)
+                save_model = load_model(model_backbone_type, feature_fuse, mode='inference')
+                save_model.load_state_dict(torch.load(save_model_path), strict=False)
+                torch.save(save_model, save_model_path)
+
+                msg = f'Save Optimized Model at Epoch [{num_epoch:5d}/{n_epochs:5d}]'
                 aiLogger.info(msg)
 
     # --------------------------------------------------------------------
     # End training this iter - Save result
     # --------------------------------------------------------------------
-    save_result(num_iter, config, save_model_path, output_path)
+    save_result(num_iter, config, save_model_path, dataset, output_path)
 
     loss_path = os.path.join(output_path, f'loss_{str(num_iter).zfill(2)}.png')
     plot_result(losses, loss_path)
 
+    # --------------------------------------------------------------------
+    # Load predict result to calculate all metrics
+    # --------------------------------------------------------------------
+    msg = 'Calculate all metrics for prediction on test dataset'
+    aiLogger.info(msg)
+
+    dice_val, iou_val, wfb_val, smeasure_val, emeasure_val = 0,0,0,0,0
+
+    gt_path = os.path.join(config['dataset'], dataset, 'test')
+    gt_path = os.path.join(gt_path, 'masks')
+    pred_path = os.path.join(output_path, str(num_iter).zfill(2), 'predict')
+
+    pred_img_path_lst = glob.glob(os.path.join(pred_path, '*'))
+
+    for pred_img_path in tqdm(pred_img_path_lst):
+        gt_img_path = os.path.join(gt_path, os.path.basename(pred_img_path))
+        if not os.path.exists(gt_img_path):
+            gt_img_path = gt_img_path[:-4] + '.jpg'
+
+        result = calculate_image_pair(gt_img_path, pred_img_path)
+        dice_val += result[0]
+        iou_val += result[1]
+        wfb_val += result[2]
+        smeasure_val += result[3]
+        emeasure_val += result[4]
+
+    dice_val /=len(pred_img_path_lst)
+    iou_val /=len(pred_img_path_lst)
+    wfb_val /=len(pred_img_path_lst)
+    smeasure_val /=len(pred_img_path_lst)
+    emeasure_val /=len(pred_img_path_lst)
+
+    with open(os.path.join(output_path, 'result.txt'), 'w', encoding='utf-8') as file:
+        metric_result = f'Dice: {dice_val:.4f} - IoU: {iou_val:.4f} - WFb: {wfb_val:.4f} \
+                        - sMeasure: {smeasure_val:.4f} - eMeasure: {emeasure_val:.4f}'
+        file.write(metric_result)
+
     return losses, coeff_max
 
 
-def train_repeats(config, output_dir):
+def train_repeats(config, output_dir, dataset, loss_type):
     """Train pipeline 1 repeat"""
     model_name = config['model']['model_name']
     repeats = int(config['hyparameters']['repeats'])
@@ -305,26 +390,44 @@ def train_repeats(config, output_dir):
     output_path = os.path.join(output_dir, model_name)
     if os.path.exists(output_path):
         shutil.rmtree(output_path)
-    os.mkdir(output_path)
+    os.makedirs(output_path, exist_ok=True)
 
     # --------------------------------------------------------------------
     # Repeats pipline
     # --------------------------------------------------------------------
     for i in range(repeats):
-        _, _ = train_loop(config, i+1, output_path)
+        _, _ = train_loop(config, i+1, output_path, dataset, loss_type)
 
 
 def main():
     """Main function"""
-    msg = f'Available DEVICE {DEVICE}'
-    aiLogger.info(msg)
+    global DEVICE # pylint: disable=W0601
 
     args = parse_args()
 
     with open(args.config, 'r', encoding='utf-8') as config_file:
         config = yaml.safe_load(config_file)
 
-    train_repeats(config, args.output)
+    if torch.cuda.is_available():
+        DEVICE = torch.device(f"cuda:{args.device}") # pylint: disable=W0621, C0103
+    msg = f'Use DEVICE {DEVICE} for training'
+    aiLogger.info(msg)
+
+    if args.loss == 'all':
+        aiLogger.info("Running all loss")
+        for dataset in DATASET_LST:
+            for loss in LOSS_LST:
+                msg = 'Training '+config['model']['model_backbone']+f' with dataset {dataset}, loss {loss}'
+                aiLogger.warning(msg)
+
+                output_path = os.path.join(args.output, '_'.join([dataset, loss]))
+                train_repeats(config, output_path, dataset, loss)
+    else:
+        for dataset in DATASET_LST:
+            msg = 'Training '+config['model']['model_backbone']+f' with dataset {dataset}, loss {loss}'
+            aiLogger.warning(msg)
+            output_path = os.path.join(args.output, '_'.join([dataset, loss]))
+            train_repeats(config, output_path, dataset, loss)
 
 
 if __name__=="__main__":

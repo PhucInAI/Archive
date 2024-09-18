@@ -1,141 +1,161 @@
-'''
-MIT License
-Copyright (c) 2020 Tauhid Khan
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-'''
+"""
+    Metrics for evaluate images
+"""
 
-import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+
+# pylint: disable=C0103, W0201, W0107, C0325
+
 import tensorflow as tf
+tf.config.set_visible_devices([], 'GPU')
 import numpy as np
 from scipy.ndimage import convolve, center_of_mass, distance_transform_edt as dtedt
 
-import glob
-import shutil
-from tqdm import tqdm
 
 def read_mask(path: str) -> tf.Tensor:
+    """
+    Reads and preprocesses a mask image from a file path.
+
+    Args:
+        path (str): The file path to the mask image.
+
+    Returns:
+        tf.Tensor: The preprocessed mask tensor.
+    """
     mask_raw = tf.io.read_file(path)
     mask = tf.io.decode_jpeg(mask_raw, channels=1)
     mask = tf.cast(mask, dtype=tf.float32)
-    mask = tf.image.resize(mask,[512, 512])
-    mask = mask/255.0
+    mask = tf.image.resize(mask, [512, 512])
+    mask = mask / 255.0
     mask = tf.expand_dims(mask, axis=0)
 
     return mask
 
+
 def dice_coef(y_mask: tf.Tensor, y_pred: tf.Tensor) -> tf.Tensor:
-    '''
-    Sorensen Dice coeffient.
-    args:   y_mask->tf.Tensor  Ground truth Map
-            y_pred->tf.Tensor  Computed Raw Mask
-    return: Dice coeff value ranging between [0-1]
-    '''
+    """
+    Computes the Dice coefficient between the ground truth mask and the predicted mask.
+
+    Args:
+        y_mask (tf.Tensor): Ground truth mask tensor.
+        y_pred (tf.Tensor): Predicted mask tensor.
+
+    Returns:
+        tf.Tensor: The Dice coefficient value.
+    """
     smooth = 1e-15
 
     y_pred = tf.cast(tf.math.greater(y_pred, 0.5), tf.float32)
     y_mask = tf.cast(tf.math.greater(y_mask, 0.5), tf.float32)
 
-    intersection = tf.reduce_sum(
-        tf.multiply(y_mask, y_pred), axis=(1, 2, 3))
+    intersection = tf.reduce_sum(tf.multiply(y_mask, y_pred), axis=(1, 2, 3))
     union = tf.reduce_sum((y_mask + y_pred), axis=(1, 2, 3)) + smooth
-    dice = tf.reduce_mean(((2*intersection+smooth) / union))
+    dice = tf.reduce_mean((2 * intersection + smooth) / union)
 
     return dice
 
 
 def iou_metric(y_mask: tf.Tensor, y_pred: tf.Tensor) -> tf.Tensor:
-    '''
-    Intersection over Union measure
-    args:   y_mask->tf.Tensor  Ground truth Map
-            y_pred->tf.Tensor  Computed Raw Mask
-    return: IoU measure value ranging between [0-1]
-    '''
+    """
+    Computes the Intersection over Union (IoU) metric between the ground truth mask and the predicted mask.
+
+    Args:
+        y_mask (tf.Tensor): Ground truth mask tensor.
+        y_pred (tf.Tensor): Predicted mask tensor.
+
+    Returns:
+        tf.Tensor: The IoU value.
+    """
     smooth = 1e-15
 
     y_pred = tf.cast(tf.greater(y_pred, 0.5), dtype=tf.float32)
     y_mask = tf.cast(tf.greater(y_mask, 0.5), dtype=tf.float32)
 
-    intersection = tf.reduce_sum(
-        tf.multiply(y_mask, y_pred), axis=(1, 2))
-
+    intersection = tf.reduce_sum(tf.multiply(y_mask, y_pred), axis=(1, 2))
     union = tf.reduce_sum((y_mask + y_pred), axis=(1, 2)) + smooth
 
-    iou = tf.reduce_mean((intersection)/(union-intersection))
+    iou = tf.reduce_mean(intersection / (union - intersection))
 
     return iou
 
-def MAE(y_mask: tf.Tensor, y_pred: tf.Tensor):
+
+def MAE(y_mask: tf.Tensor, y_pred: tf.Tensor) -> tf.Tensor:
+    """
+    Computes the Mean Absolute Error (MAE) between the ground truth mask and the predicted mask.
+
+    Args:
+        y_mask (tf.Tensor): Ground truth mask tensor.
+        y_pred (tf.Tensor): Predicted mask tensor.
+
+    Returns:
+        tf.Tensor: The MAE value.
+    """
     return tf.reduce_mean(tf.abs(y_pred - y_mask))
 
-# All other metric (wFb, Sα, Emaxφ, MAE)
 
 class WFbetaMetric(object):
-    '''
-    Rerefence https://github.com/DengPingFan/PraNet/tree/master/eval
-    The following metric is from paper: How to Evaluate Foreground Maps? (CVPR2014)
-    '''
+    """
+    Computes the Weighted F-measure (wFb) metric for evaluating foreground maps.
+
+    Reference:
+        How to Evaluate Foreground Maps? (CVPR 2014)
+    """
     def __init__(self, beta: int = 1) -> None:
-        super().__init__()
+        """
+        Initializes the WFbetaMetric class.
+
+        Args:
+            beta (int): The beta parameter for the metric. Default is 1.
+        """
         self.beta = beta
         self.eps = 1e-12
 
     def _gaussian_distribution(self, x: np.ndarray, mu: float, sigma: float) -> np.ndarray:
         """
-        It returns the gassian distribution of the given ndarray
-        args:
-            [x] - [ndarray] 
-            mu - [float] mean of the gaussian distribution
-            sigma - [float] standard deviation of the gaussian distribution
-        return:
-            ndarray - Gaussian distribution of the given x ndarray with
-            standard deviation sigma and mean mu
+        Computes the Gaussian distribution for a given array.
+
+        Args:
+            x (np.ndarray): The input array.
+            mu (float): Mean of the Gaussian distribution.
+            sigma (float): Standard deviation of the Gaussian distribution.
+
+        Returns:
+            np.ndarray: Gaussian distribution of the input array.
         """
         return 1 / (np.sqrt(2 * np.pi) * sigma) * np.exp(
-            -np.power(
-                (x - mu) / sigma, 2) / 2)
+            -np.power((x - mu) / sigma, 2) / 2)
 
     def _generate_gaussian_kernel(self, size: int, sigma: float = 1.0, mu: float = 0.0) -> np.ndarray:
         """
-        Generate gaussian kernel of given given size and dims (sizexsize)
-        args:
-            size - [int] deifnes the size of the kernel (sizexsize)
-            sigma - [float] standard diviation of gaussian
-                    distribution. It cannot be 0.0
-            mu - [float] mean of the gaussian distribution
-        return:
-            kernel2D - [ndarray] gaussian kernel the values are in range (0,1)
-        """
-        # create the 1D array of equally spaced distance point of given size
-        self.kernel_1d = np.linspace(-(size//2), size//2, size)
-        # get the gaussian distribution of the 1D array
-        self.kernel_1d = self._gaussian_distribution(
-            self.kernel_1d, mu, sigma)
+        Generates a 2D Gaussian kernel.
 
-        # Compute the outer product of kernel1D tranpose and kernel1D
+        Args:
+            size (int): Size of the kernel (size x size).
+            sigma (float): Standard deviation of the Gaussian distribution.
+            mu (float): Mean of the Gaussian distribution.
+
+        Returns:
+            np.ndarray: The generated Gaussian kernel.
+        """
+        self.kernel_1d = np.linspace(-(size // 2), size // 2, size)
+        self.kernel_1d = self._gaussian_distribution(self.kernel_1d, mu, sigma)
         self.kernel_2d = np.outer(self.kernel_1d.T, self.kernel_1d)
-        # normalize the the outer product to suish the values between 0.0-1.0
-        self.kernel_2d *= 1.0/self.kernel_2d.max()
+        self.kernel_2d *= 1.0 / self.kernel_2d.max()
         return self.kernel_2d
 
     def __call__(self, y_mask: tf.Tensor, y_pred: tf.Tensor) -> tf.Tensor:
+        """
+        Computes the WFbeta metric.
+
+        Args:
+            y_mask (tf.Tensor): Ground truth mask tensor.
+            y_pred (tf.Tensor): Predicted mask tensor.
+
+        Returns:
+            tf.Tensor: The WFbeta metric value.
+        """
         assert y_pred.ndim == y_mask.ndim and y_pred.shape == y_mask.shape
-        y_mask = tf.squeeze(y_mask)  # (b,h,w,c) => (h,w)
-        y_pred = tf.squeeze(y_pred)  # (b,h,w,c) => (h,w)
+        y_mask = tf.squeeze(y_mask)
+        y_pred = tf.squeeze(y_pred)
 
         y_pred = tf.cast(tf.greater(y_pred, 0.5), dtype=tf.int32)
         y_mask = tf.cast(tf.greater(y_mask, 0.5), dtype=tf.int32)
@@ -143,9 +163,7 @@ class WFbetaMetric(object):
         y_mask = y_mask.numpy()
 
         Dst, Idxt = dtedt(y_mask == 0, return_indices=True)
-
         E = np.abs(y_pred - y_mask)
-
         Et = np.copy(E)
         Et[y_mask == 0] = Et[Idxt[0][y_mask == 0], Idxt[1][y_mask == 0]]
 
@@ -153,8 +171,7 @@ class WFbetaMetric(object):
         EA = convolve(Et, weights=K, mode='constant', cval=0)
         MIN_E_EA = np.where(y_mask & (EA < E), EA, E)
 
-        B = np.where(y_mask == 0, 2 - np.exp(np.log(0.5) /
-                     5 * Dst), np.ones_like(y_mask))
+        B = np.where(y_mask == 0, 2 - np.exp(np.log(0.5) / 5 * Dst), np.ones_like(y_mask))
         Ew = MIN_E_EA * B
 
         TPw = np.sum(y_mask) - np.sum(Ew[y_mask == 1])
@@ -169,36 +186,66 @@ class WFbetaMetric(object):
 
 
 class SMeasure(object):
-    '''
-    Rerefence https://github.com/DengPingFan/PraNet/tree/master/eval
-    Structure-measure: A new way to evaluate foreground maps (ICCV 2017)
-    '''
+    """
+    Computes the S-measure for evaluating foreground maps.
+
+    Reference:
+        Structure-measure: A new way to evaluate foreground maps (ICCV 2017)
+    """
     def __init__(self, alpha: float = 0.5) -> None:
-        super().__init__()
+        """
+        Initializes the SMeasure class.
+
+        Args:
+            alpha (float): The alpha parameter for the metric. Default is 0.5.
+        """
         self.alpha = alpha
 
-    def _object(self, inp1:np.ndarray, inp2:np.ndarray)->tf.Tensor:
-        '''
-        Computes BG and FG comparison of GT and SM
-        '''
+    def _object(self, inp1: np.ndarray, inp2: np.ndarray) -> tf.Tensor:
+        """
+        Computes the object-level similarity score.
+
+        Args:
+            inp1 (np.ndarray): First input array (foreground).
+            inp2 (np.ndarray): Second input array (ground truth).
+
+        Returns:
+            tf.Tensor: The object-level similarity score.
+        """
         x = np.mean(inp1[inp2])
         sigma_x = np.std(inp1[inp2])
         score = 2 * x / (x**2 + 1 + sigma_x + 1e-8)
-        return tf.cast(score,dtype=tf.float32)
+        return tf.cast(score, dtype=tf.float32)
 
-    def s_object(self, SM: tf.Tensor, GT: tf.Tensor)->tf.Tensor:
-        '''
-        Computes similarity between GT and SM at object level
-        '''
+    def s_object(self, SM: tf.Tensor, GT: tf.Tensor) -> tf.Tensor:
+        """
+        Computes the object-level similarity between the predicted and ground truth masks.
+
+        Args:
+            SM (tf.Tensor): Predicted mask tensor.
+            GT (tf.Tensor): Ground truth mask tensor.
+
+        Returns:
+            tf.Tensor: The object-level similarity score.
+        """
         fg = SM * GT
         bg = (1 - SM) * (1 - GT)
 
         u = tf.reduce_mean(GT)
-        # converting GT to logical type(i.e bool type)
         GT = tf.cast(GT, dtype=tf.bool)
         return u * self._object(fg.numpy(), GT.numpy()) + (1 - u) * self._object(bg.numpy(), tf.logical_not(GT.numpy()))
 
-    def _ssim(self, SM: tf.Tensor, GT: tf.Tensor):
+    def _ssim(self, SM: tf.Tensor, GT: tf.Tensor) -> tf.Tensor:
+        """
+        Computes the Structural Similarity Index (SSIM) between two tensors.
+
+        Args:
+            SM (tf.Tensor): First tensor (predicted mask).
+            GT (tf.Tensor): Second tensor (ground truth mask).
+
+        Returns:
+            tf.Tensor: The SSIM score.
+        """
         h, w = SM.shape
         N = h * w
 
@@ -222,16 +269,24 @@ class SMeasure(object):
         return score
 
     def _divideGT(self, GT: tf.Tensor, x: int, y: int) -> tuple:
-        # get H.W and area of GT
+        """
+        Divides the ground truth mask into four blocks.
+
+        Args:
+            GT (tf.Tensor): Ground truth mask tensor.
+            x (int): x-coordinate for division.
+            y (int): y-coordinate for division.
+
+        Returns:
+            tuple: Four blocks of the ground truth mask and their respective weights.
+        """
         h, w = GT.shape
-        area = h*w
-        # divide GT into four blocks
+        area = h * w
         UL = GT[0:y, 0:x]
         UR = GT[0:y, x:w]
         LL = GT[y:h, 0:x]
         LR = GT[y:h, x:w]
 
-        # calculate weigths i.e  area_of_blocks/area_of_GT
         w1 = (x * y) / area
         w2 = y * (w - x) / area
         w3 = (h - y) * x / area
@@ -240,10 +295,18 @@ class SMeasure(object):
         return UL, UR, LL, LR, w1, w2, w3, w4
 
     def _divideSM(self, SM: tf.Tensor, x: int, y: int) -> tuple:
-        # get H.W and area of SM
+        """
+        Divides the predicted mask into four blocks.
+
+        Args:
+            SM (tf.Tensor): Predicted mask tensor.
+            x (int): x-coordinate for division.
+            y (int): y-coordinate for division.
+
+        Returns:
+            tuple: Four blocks of the predicted mask.
+        """
         h, w = SM.shape
-        area = h*w
-        # divide SM into four blocks
         UL = SM[0:y, 0:x]
         UR = SM[0:y, x:w]
         LL = SM[y:h, 0:x]
@@ -252,16 +315,21 @@ class SMeasure(object):
         return UL, UR, LL, LR
 
     def s_region(self, y_mask: tf.Tensor, y_pred: tf.Tensor) -> tf.Tensor:
-        '''
-        Calculates Region aware structural similarity 
-        '''
-        # get the centre of mass of y_mask
+        """
+        Computes the region-aware structural similarity score.
+
+        Args:
+            y_mask (tf.Tensor): Ground truth mask tensor.
+            y_pred (tf.Tensor): Predicted mask tensor.
+
+        Returns:
+            tf.Tensor: The region-aware structural similarity score.
+        """
         [y, x] = center_of_mass(y_mask.numpy())
         x = int(round(x)) + 1
-        y = int(round(x)) + 1
+        y = int(round(y)) + 1
 
-        gt1, gt2, gt3, gt4, w1, w2, w3, w4 = self._divideGT(
-            GT=y_mask, x=x, y=y)
+        gt1, gt2, gt3, gt4, w1, w2, w3, w4 = self._divideGT(GT=y_mask, x=x, y=y)
         sm1, sm2, sm3, sm4 = self._divideSM(SM=y_pred, x=x, y=y)
 
         score1 = self._ssim(sm1, gt1)
@@ -272,9 +340,19 @@ class SMeasure(object):
         return w1 * score1 + w2 * score2 + w3 * score3 + w4 * score4
 
     def __call__(self, y_mask: tf.Tensor, y_pred: tf.Tensor) -> tf.Tensor:
+        """
+        Computes the S-measure metric.
+
+        Args:
+            y_mask (tf.Tensor): Ground truth mask tensor.
+            y_pred (tf.Tensor): Predicted mask tensor.
+
+        Returns:
+            tf.Tensor: The S-measure value.
+        """
         assert y_pred.ndim == y_mask.ndim and y_pred.shape == y_mask.shape
-        y_mask = tf.squeeze(y_mask)  # (b,h,w,c) => (h,w)
-        y_pred = tf.squeeze(y_pred)  # (b,h,w,c) => (h,w)
+        y_mask = tf.squeeze(y_mask)
+        y_pred = tf.squeeze(y_pred)
         y_pred = tf.cast(tf.greater(y_pred, 0.5), dtype=tf.float32)
         y_mask = tf.cast(tf.greater(y_mask, 0.5), dtype=tf.float32)
         y = tf.reduce_mean(y_mask)
@@ -283,35 +361,69 @@ class SMeasure(object):
         elif y == 1:
             score = tf.reduce_mean(y_pred)
         else:
-            score = self.alpha * self.s_object(y_pred, y_mask) + (1 - self.alpha) * self.s_region(y_mask=y_mask,y_pred=y_pred)
+            score = self.alpha * self.s_object(y_pred, y_mask) + (1 - self.alpha) * self.s_region(y_mask=y_mask, y_pred=y_pred)
         return score
 
 
 class Emeasure(object):
-    ''' 
-    Enhanced-alignment Measure for Binary Foreground Map Evaluation (IJCAI 2018)
-    Reference: https://github.com/Xiaoqi-Zhao-DLUT/DANet-RGBD-Saliency/blob/master/saliency_metric.py
-    '''
-    def __init__(self):
+    """
+    Computes the Enhanced-alignment measure for evaluating binary foreground maps.
+
+    Reference:
+        Enhanced-alignment Measure for Binary Foreground Map Evaluation (IJCAI 2018)
+    """
+    def __init__(self) -> None:
+        """
+        Initializes the Emeasure class.
+        """
         pass
 
-    def AlignmentTerm(self, dFM, dy_mask):
+    def AlignmentTerm(self, dFM: np.ndarray, dy_mask: np.ndarray) -> np.ndarray:
+        """
+        Computes the alignment term between the predicted foreground map and the ground truth mask.
+
+        Args:
+            dFM (np.ndarray): Predicted foreground map.
+            dy_mask (np.ndarray): Ground truth mask.
+
+        Returns:
+            np.ndarray: The alignment matrix.
+        """
         mu_FM = np.mean(dFM)
         mu_y_mask = np.mean(dy_mask)
         align_FM = dFM - mu_FM
         align_y_mask = dy_mask - mu_y_mask
-        align_Matrix = 2. * (align_y_mask * align_FM) / \
-            (align_y_mask * align_y_mask + align_FM * align_FM + 1e-8)
+        align_Matrix = 2. * (align_y_mask * align_FM) / (
+            align_y_mask * align_y_mask + align_FM * align_FM + 1e-8)
         return align_Matrix
 
-    def EnhancedAlignmentTerm(self, align_Matrix):
+    def EnhancedAlignmentTerm(self, align_Matrix: np.ndarray) -> np.ndarray:
+        """
+        Computes the enhanced alignment term.
+
+        Args:
+            align_Matrix (np.ndarray): The alignment matrix.
+
+        Returns:
+            np.ndarray: The enhanced alignment matrix.
+        """
         enhanced = np.power(align_Matrix + 1, 2) / 4
         return enhanced
 
-    def __call__(self, y_mask: tf.Tensor, y_pred: tf.Tensor):
+    def __call__(self, y_mask: tf.Tensor, y_pred: tf.Tensor) -> tf.Tensor:
+        """
+        Computes the E-measure metric.
+
+        Args:
+            y_mask (tf.Tensor): Ground truth mask tensor.
+            y_pred (tf.Tensor): Predicted mask tensor.
+
+        Returns:
+            tf.Tensor: The E-measure value.
+        """
         assert y_pred.ndim == y_mask.ndim and y_pred.shape == y_mask.shape
-        y_mask = tf.squeeze(y_mask)  # (b,h,w,c) => (h,w)
-        y_pred = tf.squeeze(y_pred)  # (b,h,w,c) => (h,w)
+        y_mask = tf.squeeze(y_mask)
+        y_pred = tf.squeeze(y_pred)
         y_pred = tf.cast(tf.greater(y_pred, 0.5), dtype=tf.float32)
         y_mask = tf.cast(tf.greater(y_mask, 0.5), dtype=tf.float32)
 
@@ -328,7 +440,7 @@ class Emeasure(object):
         dFM = np.double(FM)
 
         if (sum(sum(np.double(y_mask))) == 0):
-            enhanced_matrix = 1.0-dFM
+            enhanced_matrix = 1.0 - dFM
         elif (sum(sum(np.double(~y_mask))) == 0):
             enhanced_matrix = dFM
         else:
@@ -341,202 +453,20 @@ class Emeasure(object):
 
         return tf.cast(score, dtype=tf.float32)
 
+def calculate_image_pair(gt_path, pred_path):
+    """Calculate all metrics for 1 GT-pred pair"""
 
+    wFb_obj = WFbetaMetric()
+    smeasure_obj = SMeasure()
+    emeasure_obj = Emeasure()
 
-# test 
-if __name__ == "__main__":
+    y_mask = read_mask(gt_path)
+    y_pred = read_mask(pred_path)
 
-    # # --------------------------------------------------------------------
-    # # LA
-    # # --------------------------------------------------------------------
-    # gt_folder = '/home/ptn/Storage/FFESNet/data/CVC-ClinicDB_Splited/testSplited/masks'
-    # # pred_folder = '/home/ptn/Storage/FFESNet/runs/LA_FFESNet_PAN_CVC-ClinicDB/01/predict'
-    # pred_folder = '/home/ptn/Storage/FFESNet/backups/thesis/SavedESFPNetandImageResult/Table_3_LA_Two_Datasets/CVC-ClinicDB_Splited_0.949/prediction'
+    dice_val = dice_coef(y_mask, y_pred).numpy()
+    iou_val = iou_metric(y_mask, y_pred).numpy()
+    wFb_val = wFb_obj(y_mask=y_mask, y_pred=y_pred).numpy()
+    smeasure_val = smeasure_obj(y_mask=y_mask, y_pred=y_pred).numpy()
+    emeasure_val = emeasure_obj(y_mask=y_mask, y_pred=y_pred).numpy()
 
-    # wFb_metric = WFbetaMetric()
-    # smeasure_metric = SMeasure()
-    # emeasure_metric = Emeasure()
-
-    # m_dice = []
-    # m_iou = []
-    # m_wfb = []
-    # m_smeasure = []
-    # m_emeasure = []
-    # m_mae = []
-
-    # gt_path_lst = glob.glob(os.path.join(gt_folder, '*png')) + glob.glob(os.path.join(gt_folder, '*jpg'))
-    # for gt_path in tqdm(gt_path_lst):
-    #     pred_path = os.path.join(pred_folder, os.path.basename(gt_path))
-
-    #     y_mask = read_mask(gt_path)
-    #     y_pred = read_mask(pred_path)
-
-    #     dice_metric = dice_coef(y_mask, y_pred)
-    #     iou = iou_metric(y_mask, y_pred)
-    #     wfb = wFb_metric(y_mask=y_mask, y_pred=y_pred)
-    #     smeasure = smeasure_metric(y_mask=y_mask, y_pred=y_pred)
-    #     emeasure = emeasure_metric(y_mask=y_mask, y_pred=y_pred)
-    #     mae = MAE(y_mask=y_mask, y_pred=y_mask)
-
-    #     m_dice.append(dice_metric.numpy())
-    #     m_iou.append(iou.numpy())
-    #     m_wfb.append(wfb.numpy())
-    #     m_smeasure.append(emeasure.numpy())
-    #     m_emeasure.append(smeasure.numpy())
-    #     m_mae.append(mae.numpy())
-
-    # print('Mean dice    :', np.mean(m_dice))
-    # print('Mean IoU     :', np.mean(m_iou))
-    # print('Mean WFB     :', np.mean(m_wfb))
-    # print('Mean SMeasure:', np.mean(m_smeasure))
-    # print('Mean EMeasure:', np.mean(m_emeasure))
-    # print('MAE          :', np.mean(m_mae))
-
-    # # --------------------------------------------------------------------
-    # # GA, note that train code incorrect PB to GA
-    # # --------------------------------------------------------------------
-    # # datasets = ['ETIS-LaribPolypDB', 'CVC-ColonDB']
-    # # datasets = ['ETIS-LaribPolypDB']
-    # datasets = ['CVC-ColonDB']
-    # pred_n_lst = ['01', '02']
-    # gt_dir = '/home/ptn/Storage/FFESNet/data/TestDataset'
-    # model_dir = '/home/ptn/Storage/FFESNet/backups/GA'
-    # model_path_lst = list(sorted(glob.glob(os.path.join(model_dir, '*', '*'))))
-
-    # for model_path in model_path_lst:
-    #     print("=-=-=-=-=-=-=-=-=-=-=-=-=--=-=-=-=-=-=-=-=-=-=-=-=-=-==-=-=-=-=-=-=")
-    #     print(os.path.basename(model_path))
-
-    #     for dataset in datasets:
-    #         # print("=-=-=-=-=-=-=-=-=-=-=")
-    #         # print(dataset)
-
-    #         final_dice = 0
-    #         final_iou = 0
-    #         final_smeasure = 0
-    #         final_emeasure = 0
-    #         total_score = 0
-
-    #         gt_folder = os.path.join(gt_dir, dataset, 'masks')
-    #         gt_path_lst = glob.glob(os.path.join(gt_folder, '*png')) + glob.glob(os.path.join(gt_folder, '*jpg'))
-
-    #         for pred_n in pred_n_lst:
-    #             try:
-    #                 pred_folder = os.path.join(model_path, pred_n, 'predict_PB', dataset)
-
-    #                 smeasure_metric = SMeasure()
-    #                 emeasure_metric = Emeasure()
-
-    #                 m_dice = []
-    #                 m_iou = []
-    #                 m_smeasure = []
-    #                 m_emeasure = []
-    #                 for gt_path in gt_path_lst:
-    #                     pred_path = os.path.join(pred_folder, os.path.basename(gt_path))
-
-    #                     y_mask = read_mask(gt_path)
-    #                     y_pred = read_mask(pred_path)
-
-    #                     dice_metric = dice_coef(y_mask, y_pred)
-    #                     iou = iou_metric(y_mask, y_pred)
-    #                     smeasure = smeasure_metric(y_mask=y_mask, y_pred=y_pred)
-    #                     emeasure = emeasure_metric(y_mask=y_mask, y_pred=y_pred)
-
-    #                     m_dice.append(dice_metric.numpy())
-    #                     m_iou.append(iou.numpy())
-    #                     m_smeasure.append(emeasure.numpy())
-    #                     m_emeasure.append(smeasure.numpy())
-
-    #                 m_dice = np.mean(m_dice)
-    #                 m_iou = np.mean(m_iou)
-    #                 m_smeasure = np.mean(m_smeasure)
-    #                 m_emeasure = np.mean(m_emeasure)
-
-    #                 if m_dice + m_iou + m_smeasure + m_emeasure > total_score:
-    #                     final_dice = m_dice
-    #                     final_iou = m_iou
-    #                     final_smeasure = m_smeasure
-    #                     final_emeasure = m_emeasure
-    #             except:
-    #                 pass
-
-    #         print('Mean dice    :', f"{final_dice:.3f}")
-    #         print('Mean IoU     :', f"{final_iou:.3f}")
-    #         print('Mean SMeasure:', f"{final_smeasure:.3f}")
-    #         # print('Mean EMeasure:', f"{final_emeasure:.3f}")
-
-    # --------------------------------------------------------------------
-    # PB
-    # --------------------------------------------------------------------
-    # datasets = ['ETIS-LaribPolypDB', 'CVC-ColonDB']
-    # datasets = ['ETIS-LaribPolypDB']
-    datasets = ['Kvasir', 'CVC-ClinicDB', 'CVC-300', 'CVC-ColonDB', 'ETIS-LaribPolypDB']
-    gt_dir = '/home/ptn/Storage/Research/FFESNet/data/TestDataset'
-    model_dir = '/home/ptn/Storage/Research/FFESNet/runs/FFESNet_B4'
-    model_path_lst = list(sorted(glob.glob(os.path.join(model_dir, '*'))))
-
-    # for model_path in model_path_lst:
-    #     print("=-=-=-=-=-=-=-=-=-=-=-=-=--=-=-=-=-=-=-=-=-=-=-=-=-=-==-=-=-=-=-=-=")
-    #     print(os.path.basename(model_path))
-
-    for dataset in datasets:
-        print("=-=-=-=-=-=-=-=-=-=-=")
-        print(dataset)
-
-        final_dice = 0
-        final_iou = 0
-        total_score = 0
-
-        gt_folder = os.path.join(gt_dir, dataset, 'masks')
-        gt_path_lst = glob.glob(os.path.join(gt_folder, '*png')) + glob.glob(os.path.join(gt_folder, '*jpg'))
-
-        pred_folder = os.path.join(model_dir, '01', 'predict_PB', dataset)
-
-        m_dice = []
-        m_iou = []
-        for gt_path in tqdm(gt_path_lst):
-            pred_path = os.path.join(pred_folder, os.path.basename(gt_path))
-
-            y_mask = read_mask(gt_path)
-            y_pred = read_mask(pred_path)
-
-            dice_metric = dice_coef(y_mask, y_pred)
-            iou = iou_metric(y_mask, y_pred)
-
-            m_dice.append(dice_metric.numpy())
-            m_iou.append(iou.numpy())
-
-        m_dice = np.mean(m_dice)
-        m_iou = np.mean(m_iou)
-
-        if m_dice + m_iou > total_score:
-            final_dice = m_dice
-            final_iou = m_iou
-
-        print('Mean dice    :', f"{final_dice:.3f}")
-        print('Mean IoU     :', f"{final_iou:.3f}")
-
-
-    # wFb_metric = WFbetaMetric()
-    # smeasure_metric = SMeasure()
-    # emeasure_metric = Emeasure()
-    
-    # path_to_mask1 = "/home/ptn/Storage/FFESNet/data/Kvasir_Splited/testSplited/masks/cju0ue769mxii08019zqgdbxn.png"
-    # path_to_mask2 = "/home/ptn/Storage/FFESNet/backups/Loss/FFESNet_A2FPN_B0_drop0.5_Kvasir_sufl/01/predict/cju0ue769mxii08019zqgdbxn.png"
-
-    # y_mask = read_mask(path_to_mask1)
-    # y_pred = read_mask(path_to_mask2)
-
-    # dice_metric = dice_coef(y_mask, y_pred)
-    # iou = iou_metric(y_mask, y_pred)
-    # wfb = wFb_metric(y_mask=y_mask, y_pred=y_pred)
-    # smeasure = smeasure_metric(y_mask=y_mask, y_pred=y_pred)
-    # emeasure = emeasure_metric(y_mask=y_mask, y_pred=y_pred)
-    # mae = MAE(y_mask=y_mask, y_pred=y_mask)
-
-    # tf.print(f"dice coef: {dice_metric}")
-    # tf.print(f"IoU: {iou}")
-    # tf.print(f"wFbeta: {wfb}")
-    # tf.print(f"Smeasure: {smeasure}")
-    # tf.print(f"Emeasure: {emeasure}")
-    # tf.print(f"mae: {mae}")
+    return dice_val, iou_val, wFb_val, smeasure_val, emeasure_val
