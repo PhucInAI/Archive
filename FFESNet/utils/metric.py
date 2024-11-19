@@ -24,7 +24,7 @@ def read_mask(path: str) -> tf.Tensor:
     mask_raw = tf.io.read_file(path)
     mask = tf.io.decode_jpeg(mask_raw, channels=1)
     mask = tf.cast(mask, dtype=tf.float32)
-    mask = tf.image.resize(mask, [512, 512])
+    mask = tf.image.resize(mask, [352, 352])
     mask = mask / 255.0
     mask = tf.expand_dims(mask, axis=0)
 

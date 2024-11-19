@@ -19,7 +19,7 @@ import matplotlib.pyplot as plt
 
 from FFESNet.model.model_based_mit import ModelBasedMit
 from FFESNet.utils.dataset import PolypDataset, TestDataset
-from FFESNet.utils.loss import SemanticLossFunctions
+from FFESNet.utils.loss import SemanticLossFunctions, structure_loss, Adaptive_tvMF_DiceLoss
 from FFESNet.utils.metric import calculate_image_pair
 from FFESNet.utils.ai_logger import aiLogger
 
@@ -30,18 +30,22 @@ warnings.filterwarnings("ignore")
 # DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # DEVICE = torch.device("cpu")
 global DEVICE # pylint: disable=W0604
-DATASET_LST = ['Kvasir-SEG', 'CVC-ColonDB', 'CVC-ClinicDB', 'ETIS-LaribPolypDB']
+# DATASET_LST = ['Kvasir-SEG', 'CVC-ColonDB', 'CVC-ClinicDB', 'ETIS-LaribPolypDB']
+# DATASET_LST = ['Kvasir-SEG', 'CVC-ColonDB']
+DATASET_LST = ['CVC-ClinicDB', 'ETIS-LaribPolypDB']
 LOSS_LST =  [
                 # 'weighted_cross_entropy_loss',
                 # 'focal_loss',
                 # 'dice_loss',
                 # 'bce_dice_loss',
                 # 'tversky_loss',
-                'log_cosh_dice_loss',
-                'jacard_loss',
-                'ssim_loss',
-                'unet3p_hybrid_loss',
-                'basnet_hybrid_loss',
+                # 'log_cosh_dice_loss',
+                # 'jacard_loss',
+                # 'ssim_loss',
+                # 'unet3p_hybrid_loss',
+                # 'basnet_hybrid_loss',
+                # 'structure_loss',
+                'atvmf'
             ]
 
 
@@ -58,8 +62,8 @@ def parse_args():
     return args
 
 
-def loss_function(y_true, y_pred, loss_type):
-    """Ccmpute loss based on loss type"""
+def loss_function(y_true, y_pred, loss_type, kappa):
+    """Compute loss based on loss type"""
     loss_obj = SemanticLossFunctions()
     match loss_type:
         case 'weighted_cross_entropy_loss':
@@ -82,11 +86,16 @@ def loss_function(y_true, y_pred, loss_type):
             loss = loss_obj.unet3p_hybrid_loss(y_true, y_pred)
         case 'basnet_hybrid_loss':
             loss = loss_obj.basnet_hybrid_loss(y_true, y_pred)
+        case 'structure_loss':
+            loss = structure_loss(y_pred, y_true)
+        case 'atvmf':
+            loss_obj = Adaptive_tvMF_DiceLoss(1)
+            loss = loss_obj(y_pred, y_true, kappa)
 
     return loss
 
 
-def load_model(model_backbone_type, feature_fuse, prediction='linear', mode='inference'):
+def load_model(model_backbone_type, feature_fuse, prediction, mode='inference'):
     """Load model"""
     model = ModelBasedMit(
                             model_backbone_type=model_backbone_type,
@@ -98,7 +107,7 @@ def load_model(model_backbone_type, feature_fuse, prediction='linear', mode='inf
 
 
 def evaluate(config, model, dataset): # pylint: disable = W0621
-    """Evaluate model"""    
+    """Evaluate model"""
     # --------------------------------------------------------------------
     # Switch model to eval mode and init output
     # --------------------------------------------------------------------
@@ -213,6 +222,11 @@ def plot_result(result_lst, save_path):
     plt.savefig(save_path)
 
 
+def adjust_kappa(mm):
+    alpha=32
+    return torch.full((1,), mm*alpha).cuda(DEVICE)
+
+
 def train_loop(config, num_iter, output_path, dataset, loss_type):
     """Train loop for 1 iteration"""
     # --------------------------------------------------------------------
@@ -220,6 +234,7 @@ def train_loop(config, num_iter, output_path, dataset, loss_type):
     # --------------------------------------------------------------------
     model_backbone_type = config['model']['model_backbone']
     feature_fuse = config['model']['feature_fuse']
+    prediction = config['model']['prediction']
 
     n_epochs = int(config['hyparameters']['n_epochs'])
     init_lr = float(config['hyparameters']['learning_rate'])
@@ -230,17 +245,18 @@ def train_loop(config, num_iter, output_path, dataset, loss_type):
     # Clear GPU cache and load model
     # --------------------------------------------------------------------
     torch.cuda.empty_cache()
-    model = load_model(model_backbone_type, feature_fuse, mode='train')
+    model = load_model(model_backbone_type, feature_fuse, prediction, mode='train')
     model.to(DEVICE)
     lr = init_lr
     model_optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
-    scheduler = torch.optim.lr_scheduler.StepLR(model_optimizer, step_size=50, gamma=0.3)
+    # scheduler = torch.optim.lr_scheduler.StepLR(model_optimizer, step_size=50, gamma=0.3)
 
     # --------------------------------------------------------------------
     # Keep track of losses over time
     # --------------------------------------------------------------------
     losses = []
     coeff_max = 0
+    kappa = torch.Tensor(np.zeros((1))).cuda(DEVICE)
 
     # --------------------------------------------------------------------
     # Set up data
@@ -259,7 +275,7 @@ def train_loop(config, num_iter, output_path, dataset, loss_type):
     # --------------------------------------------------------------------
     # Training pipleline
     # --------------------------------------------------------------------
-    for step in range(1, total_steps):
+    for step in range(1, total_steps+1):
 
         # ----------------------------------------------------------------
         # Reset iterators for each epoch
@@ -279,11 +295,12 @@ def train_loop(config, num_iter, output_path, dataset, loss_type):
         out, out_aux = model(images)
         out = F.interpolate(out, size=masks.shape[2:], mode='bilinear', align_corners=False)
         out_aux = F.interpolate(out_aux, size=masks.shape[2:], mode='bilinear', align_corners=False)
-        out = out.sigmoid()
-        out_aux = out_aux.sigmoid()
+        if loss_type != 'structure_loss':
+            out = out.sigmoid()
+            out_aux = out_aux.sigmoid()
 
-        loss = loss_function(masks, out, loss_type)
-        loss_aux = loss_function(masks, out_aux, loss_type)
+        loss = loss_function(masks, out, loss_type, kappa)
+        loss_aux = loss_function(masks, out_aux, loss_type, kappa)
         total_loss = loss + loss_aux
         total_loss.backward()
         model_optimizer.step()
@@ -299,15 +316,20 @@ def train_loop(config, num_iter, output_path, dataset, loss_type):
             msg = f'Epoch [{num_epoch:5d}/{n_epochs:5d}] | preliminary loss: {loss.item():6.6f} '
             aiLogger.info(msg)
 
-            # ------------------------------------------------------------
-            # Update lr
-            scheduler.step()
+            # # ------------------------------------------------------------
+            # # Update lr
+            # scheduler.step()
 
             # ------------------------------------------------------------
             # Log loss of valid
             validation_coeff = evaluate(config, model, dataset)
             msg = f'Epoch [{num_epoch:5d}/{n_epochs:5d}] | validation coeffient: {validation_coeff:6.6f}'
             aiLogger.info(msg)
+
+            # ------------------------------------------------------------
+            # Update Kappa (for atvmf loss)
+            if loss_type == 'atvmf':
+                kappa = adjust_kappa(validation_coeff)
 
             # ------------------------------------------------------------
             # Save model if get better validation
@@ -324,57 +346,58 @@ def train_loop(config, num_iter, output_path, dataset, loss_type):
                 # Save only inference brach
                 save_model_path = os.path.join(save_model_folder, 'model.pt')
                 torch.save(model.state_dict(), save_model_path)
-                save_model = load_model(model_backbone_type, feature_fuse, mode='inference')
+                save_model = load_model(model_backbone_type, feature_fuse, prediction, mode='inference')
                 save_model.load_state_dict(torch.load(save_model_path), strict=False)
                 torch.save(save_model, save_model_path)
 
                 msg = f'Save Optimized Model at Epoch [{num_epoch:5d}/{n_epochs:5d}]'
                 aiLogger.info(msg)
 
-    # --------------------------------------------------------------------
-    # End training this iter - Save result
-    # --------------------------------------------------------------------
-    save_result(num_iter, config, save_model_path, dataset, output_path)
+        if step % (steps_per_epoch*10) == 0 or step == total_steps:
+            # --------------------------------------------------------------------
+            # End training this iter - Save result
+            # --------------------------------------------------------------------
+            save_result(num_iter, config, save_model_path, dataset, output_path)
 
-    loss_path = os.path.join(output_path, f'loss_{str(num_iter).zfill(2)}.png')
-    plot_result(losses, loss_path)
+            loss_path = os.path.join(output_path, f'loss_{str(num_iter).zfill(2)}.png')
+            plot_result(losses, loss_path)
 
-    # --------------------------------------------------------------------
-    # Load predict result to calculate all metrics
-    # --------------------------------------------------------------------
-    msg = 'Calculate all metrics for prediction on test dataset'
-    aiLogger.info(msg)
+            # --------------------------------------------------------------------
+            # Load predict result to calculate all metrics
+            # --------------------------------------------------------------------
+            msg = 'Calculate all metrics for prediction on test dataset'
+            aiLogger.info(msg)
 
-    dice_val, iou_val, wfb_val, smeasure_val, emeasure_val = 0,0,0,0,0
+            dice_val, iou_val, wfb_val, smeasure_val, emeasure_val = 0,0,0,0,0
 
-    gt_path = os.path.join(config['dataset'], dataset, 'test')
-    gt_path = os.path.join(gt_path, 'masks')
-    pred_path = os.path.join(output_path, str(num_iter).zfill(2), 'predict')
+            gt_path = os.path.join(config['dataset'], dataset, 'test')
+            gt_path = os.path.join(gt_path, 'masks')
+            pred_path = os.path.join(output_path, str(num_iter).zfill(2), 'predict')
 
-    pred_img_path_lst = glob.glob(os.path.join(pred_path, '*'))
+            pred_img_path_lst = glob.glob(os.path.join(pred_path, '*'))
 
-    for pred_img_path in tqdm(pred_img_path_lst):
-        gt_img_path = os.path.join(gt_path, os.path.basename(pred_img_path))
-        if not os.path.exists(gt_img_path):
-            gt_img_path = gt_img_path[:-4] + '.jpg'
+            for pred_img_path in tqdm(pred_img_path_lst):
+                gt_img_path = os.path.join(gt_path, os.path.basename(pred_img_path))
+                if not os.path.exists(gt_img_path):
+                    gt_img_path = gt_img_path[:-4] + '.jpg'
 
-        result = calculate_image_pair(gt_img_path, pred_img_path)
-        dice_val += result[0]
-        iou_val += result[1]
-        wfb_val += result[2]
-        smeasure_val += result[3]
-        emeasure_val += result[4]
+                result = calculate_image_pair(gt_img_path, pred_img_path)
+                dice_val += result[0]
+                iou_val += result[1]
+                wfb_val += result[2]
+                smeasure_val += result[3]
+                emeasure_val += result[4]
 
-    dice_val /=len(pred_img_path_lst)
-    iou_val /=len(pred_img_path_lst)
-    wfb_val /=len(pred_img_path_lst)
-    smeasure_val /=len(pred_img_path_lst)
-    emeasure_val /=len(pred_img_path_lst)
+            dice_val /=len(pred_img_path_lst)
+            iou_val /=len(pred_img_path_lst)
+            wfb_val /=len(pred_img_path_lst)
+            smeasure_val /=len(pred_img_path_lst)
+            emeasure_val /=len(pred_img_path_lst)
 
-    with open(os.path.join(output_path, 'result.txt'), 'w', encoding='utf-8') as file:
-        metric_result = f'Dice: {dice_val:.4f} - IoU: {iou_val:.4f} - WFb: {wfb_val:.4f} \
-                        - sMeasure: {smeasure_val:.4f} - eMeasure: {emeasure_val:.4f}'
-        file.write(metric_result)
+            with open(os.path.join(output_path, str(num_iter).zfill(2), 'result.txt'), 'w', encoding='utf-8') as file:
+                metric_result = f"""Dice: {dice_val:.4f} - IoU: {iou_val:.4f} - WFb: {wfb_val:.4f}
+                                - sMeasure: {smeasure_val:.4f} - eMeasure: {emeasure_val:.4f}"""
+                file.write(metric_result)
 
     return losses, coeff_max
 
@@ -420,13 +443,13 @@ def main():
                 msg = 'Training '+config['model']['model_backbone']+f' with dataset {dataset}, loss {loss}'
                 aiLogger.warning(msg)
 
-                output_path = os.path.join(args.output, '_'.join([dataset, loss]))
+                output_path = os.path.join(args.output, dataset, loss)
                 train_repeats(config, output_path, dataset, loss)
     else:
         for dataset in DATASET_LST:
             msg = 'Training '+config['model']['model_backbone']+f' with dataset {dataset}, loss {loss}'
             aiLogger.warning(msg)
-            output_path = os.path.join(args.output, '_'.join([dataset, loss]))
+            output_path = os.path.join(args.output, dataset, loss)
             train_repeats(config, output_path, dataset, loss)
 
 

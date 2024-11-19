@@ -6,10 +6,14 @@ https://github.com/shruti-jadon/Semantic-Segmentation-Loss-Functions
 NOTE: Edit from Tensorflow (original source) to Pytorch 
 """
 
+# pylint: disable=all
 
-import torch
-import torch.nn.functional as F
+import numpy as np
+from scipy.ndimage import zoom
 from pytorch_msssim import SSIM
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 
 
 class SemanticLossFunctions:
@@ -379,3 +383,61 @@ class SemanticLossFunctions:
         ms_ssim_loss = self.ssim_loss(y_true, y_pred)
         jacard_loss = self.jacard_loss(y_true, y_pred)
         return bce_loss + ms_ssim_loss + jacard_loss
+
+
+def structure_loss(pred, mask):
+    weit = 1 + 5*torch.abs(F.avg_pool2d(mask, kernel_size=31, stride=1, padding=15) - mask)
+    wbce = F.binary_cross_entropy_with_logits(pred, mask, reduce='none')
+    wbce = (weit*wbce).sum(dim=(2, 3)) / weit.sum(dim=(2, 3))
+
+    pred = torch.sigmoid(pred)
+    inter = ((pred * mask)*weit).sum(dim=(2, 3))
+    union = ((pred + mask)*weit).sum(dim=(2, 3))
+    wiou = 1 - (inter + 1)/(union - inter+1)
+    return (wbce + wiou).mean()
+
+# ########################################################################
+# Adaptive tvMF Dice loss
+# ########################################################################
+class Adaptive_tvMF_DiceLoss(nn.Module):
+    def __init__(self, n_classes):
+        super(Adaptive_tvMF_DiceLoss, self).__init__()
+        self.n_classes = n_classes
+
+    ### one-hot encoding ###
+    def _one_hot_encoder(self, input_tensor):
+        tensor_list = []
+        for i in range(self.n_classes):
+            temp_prob = input_tensor == i
+            tensor_list.append(temp_prob.unsqueeze(1))
+        output_tensor = torch.cat(tensor_list, dim=1)
+        return output_tensor.float()
+
+    ### tvmf dice loss ###
+    def _tvmf_dice_loss(self, score, target, kappa):
+        target = target.float()
+        smooth = 1.0
+
+        # score = F.normalize(score, p=2, dim=[0,1,2])
+        # target = F.normalize(target, p=2, dim=[0,1,2])
+        score = score.view(-1)
+        target = target.view(-1)
+        cosine = torch.sum(score * target)/(torch.sqrt(torch.sum(score*score))*torch.sqrt(torch.sum(target*target)))
+        intersect =  (1. + cosine).div(1. + (1.- cosine).mul(kappa)) - 1.
+        loss = (1 - intersect)**2.0
+
+        return loss
+
+    ### main ###
+    def forward(self, inputs, target, kappa=None, sigmoid=False):
+        if sigmoid:
+            inputs = torch.sigmoid(inputs, dim=1)
+        # target = self._one_hot_encoder(target)
+        assert inputs.size() == target.size(), 'predict {} & target {} shape do not match'.format(inputs.size(), target.size())
+        loss = 0.0
+
+        for i in range(0, self.n_classes):
+            # print(inputs[:, i].size())
+            tvmf_dice = self._tvmf_dice_loss(inputs[:, i], target[:, i], kappa[i])
+            loss += tvmf_dice
+        return loss / self.n_classes

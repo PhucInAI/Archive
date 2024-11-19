@@ -12,6 +12,7 @@ LJMU thesis work, focus on medical segmentation with ViTs
     pip install mmcv==2.2.0 -f https://download.openmmlab.com/mmcv/dist/cu118/torch2.3/index.html
     pip install matplotlib seaborn scikit-learn scikit-image jupyter
     pip install tensorflow==2.14.0
+    pip install fvcore
     
     pip install -e .
 ```

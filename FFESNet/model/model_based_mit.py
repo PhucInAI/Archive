@@ -1,6 +1,8 @@
 """Model define"""
 
 
+# import os
+# os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 import torch
 import torch.nn.functional as F
 from torch import nn
@@ -15,6 +17,8 @@ from FFESNet.model.auxiliary_components import (
                                                 RepNCSPELAN4,
                                                 ADown,
                                                )
+from FFESNet.model.mafm import MultiScaleAttentionFusionModule
+from fvcore.nn.flop_count import flop_count
 from FFESNet.utils.ai_logger import aiLogger
 
 
@@ -25,7 +29,7 @@ class ModelBasedMit(nn.Module):
         super().__init__()
         self.model_backbone_type = model_backbone_type
         self.mode = mode
-
+        self.prediction = prediction
 
         # ################################################################
         # Main branch
@@ -164,16 +168,24 @@ class ModelBasedMit(nn.Module):
         # ----------------------------------------------------------------
         # Final Prediction
         # ----------------------------------------------------------------
-        self.linear_pred = nn.Conv2d(
-                                        (
-                                            self.backbone.embed_dims[0] +\
-                                            self.backbone.embed_dims[1] +\
-                                            self.backbone.embed_dims[2] +\
-                                            self.backbone.embed_dims[3]
-                                        ),
-                                        1,
-                                        kernel_size=1
-                                    )
+        if self.prediction == 'linear':
+            self.linear_pred = nn.Conv2d(
+                                            (
+                                                self.backbone.embed_dims[0] +\
+                                                self.backbone.embed_dims[1] +\
+                                                self.backbone.embed_dims[2] +\
+                                                self.backbone.embed_dims[3]
+                                            ),
+                                            1,
+                                            kernel_size=1
+                                        )
+        else:
+            self.final_pred = MultiScaleAttentionFusionModule(
+                                                                C1 = self.backbone.embed_dims[0],
+                                                                C2 = self.backbone.embed_dims[1],
+                                                                C3 = self.backbone.embed_dims[2],
+                                                                C4 = self.backbone.embed_dims[3],
+                                                              )
 
         if self.mode == 'train':
 
@@ -257,13 +269,21 @@ class ModelBasedMit(nn.Module):
             # ----------------------------------------------------------------
             # Prediction of auxiliary branch
             # ----------------------------------------------------------------
-            self.linear_pred_aux = nn.Conv2d(
-                                                self.backbone.embed_dims[1] +\
-                                                self.backbone.embed_dims[2] +\
-                                                self.backbone.embed_dims[3]*2,
-                                                1,
-                                                kernel_size=1
-                                            )
+            if self.prediction == 'linear':
+                self.linear_pred_aux = nn.Conv2d(
+                                                    self.backbone.embed_dims[1] +\
+                                                    self.backbone.embed_dims[2] +\
+                                                    self.backbone.embed_dims[3]*2,
+                                                    1,
+                                                    kernel_size=1
+                                                )
+            else:
+                self.final_pred_aux = MultiScaleAttentionFusionModule(
+                                                                        C1 = self.backbone.embed_dims[1],
+                                                                        C2 = self.backbone.embed_dims[2],
+                                                                        C3 = self.backbone.embed_dims[3],
+                                                                        C4 = self.backbone.embed_dims[3],
+                                                                     )
 
 
     def _init_weights(self):
@@ -341,51 +361,61 @@ class ModelBasedMit(nn.Module):
         ff_3 = self.ff_3(out_3)
         ff_4 = self.ff_4(out_4)
 
-        # Linear fuse and go pass Fused Header
-        ff_34 = self.ff_34(self.linear_fuse34(torch.cat([
-                                                            ff_3,
-                                                            F.interpolate(
-                                                                            ff_4,
-                                                                            scale_factor=2,
-                                                                            mode='bilinear',
-                                                                            align_corners=False
-                                                                          )
-                                                        ],
-                                                        dim=1
-                                                       )))
-        ff_23 = self.ff_23(self.linear_fuse23(torch.cat([
-                                                            ff_2,
-                                                            F.interpolate(
-                                                                            ff_34,
-                                                                            scale_factor=2,
-                                                                            mode='bilinear',
-                                                                            align_corners=False
-                                                                         )
-                                                        ],
-                                                        dim=1
-                                                       )))
-        ff_12 = self.ff_12(self.linear_fuse12(torch.cat([
-                                                            ff_1,
-                                                            F.interpolate(
-                                                                            ff_23,
-                                                                            scale_factor=2,
-                                                                            mode='bilinear',
-                                                                            align_corners=False
-                                                                         )
-                                                        ],
-                                                        dim=1
-                                                       )))
+        # # Linear fuse and go pass Fused Header
+        # ff_34 = self.ff_34(self.linear_fuse34(torch.cat([
+        #                                                     ff_3,
+        #                                                     F.interpolate(
+        #                                                                     ff_4,
+        #                                                                     scale_factor=2,
+        #                                                                     mode='bilinear',
+        #                                                                     align_corners=False
+        #                                                                   )
+        #                                                 ],
+        #                                                 dim=1
+        #                                                )))
+        # ff_23 = self.ff_23(self.linear_fuse23(torch.cat([
+        #                                                     ff_2,
+        #                                                     F.interpolate(
+        #                                                                     ff_34,
+        #                                                                     scale_factor=2,
+        #                                                                     mode='bilinear',
+        #                                                                     align_corners=False
+        #                                                                  )
+        #                                                 ],
+        #                                                 dim=1
+        #                                                )))
+        # ff_12 = self.ff_12(self.linear_fuse12(torch.cat([
+        #                                                     ff_1,
+        #                                                     F.interpolate(
+        #                                                                     ff_23,
+        #                                                                     scale_factor=2,
+        #                                                                     mode='bilinear',
+        #                                                                     align_corners=False
+        #                                                                  )
+        #                                                 ],
+        #                                                 dim=1
+        #                                                )))
 
         # ----------------------------------------------------------------
         # Get the final output
         # ----------------------------------------------------------------
-        ff_4_resized = F.interpolate(ff_4,scale_factor=8,mode='bilinear', align_corners=False)
-        ff_3_resized = F.interpolate(ff_34,scale_factor=4,mode='bilinear', align_corners=False)
-        ff_2_resized = F.interpolate(ff_23,scale_factor=2,mode='bilinear', align_corners=False)
-        ff_1_resized = ff_12
+        # ff_4_resized = F.interpolate(ff_4,scale_factor=8,mode='bilinear', align_corners=False)
+        # ff_3_resized = F.interpolate(ff_34,scale_factor=4,mode='bilinear', align_corners=False)
+        # ff_2_resized = F.interpolate(ff_23,scale_factor=2,mode='bilinear', align_corners=False)
+        # ff_1_resized = ff_12
 
-        out = self.linear_pred(torch.cat([ff_1_resized, ff_2_resized, ff_3_resized, ff_4_resized], dim=1))
-        out = F.interpolate(out, scale_factor=4, mode='bilinear', align_corners=False)
+        if self.prediction == 'linear':
+            ff_4_resized = F.interpolate(ff_4,scale_factor=8,mode='bilinear', align_corners=False)
+            ff_3_resized = F.interpolate(ff_34,scale_factor=4,mode='bilinear', align_corners=False)
+            ff_2_resized = F.interpolate(ff_23,scale_factor=2,mode='bilinear', align_corners=False)
+            ff_1_resized = ff_12
+
+            # out = self.final_pred([ff_1_resized, ff_2_resized, ff_3_resized, ff_4_resized])
+            out = self.linear_pred(torch.cat([ff_1_resized, ff_2_resized, ff_3_resized, ff_4_resized], dim=1))
+            out = F.interpolate(out, scale_factor=4, mode='bilinear', align_corners=False)
+        else:
+            # out = self.final_pred(ff_12, ff_23, ff_34, ff_4)
+            out = self.final_pred(ff_1, ff_2, ff_3, ff_4)
 
 
         # ################################################################
@@ -418,13 +448,16 @@ class ModelBasedMit(nn.Module):
             aux_out = self.elan4(aux_out)
             aux_out4 = aux_out
 
-            aux_out4 = F.interpolate(aux_out4,scale_factor=8,mode='bilinear', align_corners=False)
-            aux_out3 = F.interpolate(aux_out3,scale_factor=4,mode='bilinear', align_corners=False)
-            aux_out2 = F.interpolate(aux_out2,scale_factor=2,mode='bilinear', align_corners=False)
-            aux_out1 = F.interpolate(aux_out1,scale_factor=1,mode='bilinear', align_corners=False)
+            if self.prediction == 'linear':
+                aux_out4 = F.interpolate(aux_out4,scale_factor=8,mode='bilinear', align_corners=False)
+                aux_out3 = F.interpolate(aux_out3,scale_factor=4,mode='bilinear', align_corners=False)
+                aux_out2 = F.interpolate(aux_out2,scale_factor=2,mode='bilinear', align_corners=False)
+                aux_out1 = F.interpolate(aux_out1,scale_factor=1,mode='bilinear', align_corners=False)
 
-            aux_out = self.linear_pred_aux(torch.cat([aux_out1, aux_out2, aux_out3, aux_out4], dim=1))
-            aux_out = F.interpolate(aux_out, scale_factor=4, mode='bilinear', align_corners=False)
+                aux_out = self.linear_pred_aux(torch.cat([aux_out1, aux_out2, aux_out3, aux_out4], dim=1))
+                aux_out = F.interpolate(aux_out, scale_factor=4, mode='bilinear', align_corners=False)
+            else:
+                aux_out = self.final_pred_aux(aux_out1, aux_out2, aux_out3, aux_out4)
 
             return out, aux_out
 
@@ -435,15 +468,32 @@ class ModelBasedMit(nn.Module):
 def main():
     """Test function"""
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    model = ModelBasedMit('B0')
+    model = ModelBasedMit('B0', prediction='mafm', mode='inference')
     model.to(device)
+    print(sum(p.numel() for p in model.parameters())/1e6)
+
 
     # --------------------------------------------------------------------
     # Feedforward
     # --------------------------------------------------------------------
     x = torch.rand(1,3,352,352).to(device)
-    y_pred, y_pred_aux = model(x)
-    print('Successfully feedfoward!!!')
+
+    # gflop_dict, _ = flop_count(model, x)
+    # gflops = sum(gflop_dict.values())
+    # print("GFLOPs:", gflops)
+    # y_pred, y_pred_aux = model(x)
+    # print('Successfully feedfoward!!!')
+
+    from calflops import calculate_flops
+    from torchvision import models
+
+    batch_size = 1
+    input_shape = (batch_size, 3, 352, 352)
+    flops, macs, params = calculate_flops(model=model, 
+                                        input_shape=input_shape,
+                                        output_as_string=True,
+                                        output_precision=4)
+    print("FLOPs:%s   MACs:%s   Params:%s \n" %(flops, macs, params))
 
     # --------------------------------------------------------------------
     # Backprop
