@@ -1,0 +1,14 @@
+treatment categoty
+
+-basic
+one hot, dummy
+Low cardinality: Dummaies > One hot High card: label encoding
+
+- 3 models
+logistic reg -> feature creation and selection, 
+decision trees
+random forest
+-> must use cross validation
+=> choose best models
+
+step
