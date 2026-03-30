@@ -1,0 +1,15 @@
+dataset : /home/ptn/Storage/Research/FFESNet/data/LA
+
+model:
+  model_name      : 'FFESNet_B4_LP_mafm'
+  model_backbone  : 'B4'
+  feature_fuse    : 'LP'
+  prediction      : 'mafm'
+
+hyparameters:
+  init_trainsize  : 352
+  batch_size      : 12
+  repeats         : 3
+  n_epochs        : 100
+  learning_rate   : 1e-4
+  drop_rate       : 0.2
