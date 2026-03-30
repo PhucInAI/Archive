@@ -1,0 +1,15 @@
+__pycache__
+*.pyc
+*.log
+*.csv
+*.db
+*.xls
+*.xlsx
+*.egg-info
+.idea/
+docs/build
+dist/
+data/
+saved_models/
+
+
