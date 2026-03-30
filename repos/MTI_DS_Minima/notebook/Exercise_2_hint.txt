@@ -1,0 +1,4 @@
+1. Observe the differences between the training data and the test data. 
+
+2. Inspect the relationship between positions and properties of the images (e.g. RGB).
+
