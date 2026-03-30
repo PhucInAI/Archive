@@ -1,0 +1,35 @@
+Assignments/Investment_Analysis_Assignment/Submission_for_Investment_Assignment.zip
+Upgrad.code-workspace
+Exercises/test.py
+Exercises/test.ipynb
+Exercises/Inferential Statistics - Powai Flats Rent.csv
+.venv
+.vscode
+env
+Assignments/Bike-Sharing-Assignment/.ipynb_checkpoints
+.vscode/settings.json
+
+Assignments/House-Price-Prediction/House_Price_Prediction_Assignment_SubhasisJethy.zip
+.vscode/settings.json
+.vscode/settings.json
+
+Deep Learning/CNN/data
+*env
+
+Miniconda3-latest-Linux-x86_64.sh
+.gitignore
+Deep Learning/data/mnist.pkl.gz
+.vscode/settings.json
+Assignments/Melanoma-Detection-CNN/Data
+Deep Learning/CNN/flowers-20210317T060850Z-001.zip
+Assignments/Melanoma-Detection-CNN/skin_cancer_model_50_epoch.h5
+.gitignore
+Assignments/Melanoma-Detection-CNN/skin_cancer_model_50_epoch_reduced_lr.h5
+
+Assignments/Gesture-Recognition-CaseStudy/model_init_*/*
+Assignments/Gesture-Recognition-CaseStudy/model_init_2021-05-2319_32_53.423896/model-00001-1.60772-0.21053-1.61193-0.12500.h5
+.vscode/settings.json
+Assignments/Cab-Driver-Profit-Optimization/*/model_weights.h5
+*.pkl
+*.pyc
+Assignments/Cab-Driver-Profit-Optimization/Cab-driver-main/Subhasis_Trisit_Cab_Driver_Assignment.zip
