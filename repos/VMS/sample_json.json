@@ -1,0 +1,194 @@
+{
+    "engines": [
+        "danger-zone"
+    ],
+    "engines_require_approval": [],
+    "graph": {
+        "conf_thres": 0.55,
+        "event_trigger_time_interval": 30,
+        "save_frequency": 1800,
+        "max_frames_to_trigger_alert": 20,
+        "send_alert_spacing": 3.5,
+        "allowed_cat": "yellow,nonclothing",
+        "operation_start": 7,
+        "operation_end": 24,
+        "poll_interval": 120,
+        "max_disappearance": 20,
+        "min_stay": 15,
+        "snapshots_size": "(1920,1080)",
+        "zone_max_num": 1,
+        "max_size": 0.5,
+        "resize": 1.15,
+        "fill": 0,
+        "bbox_color": "(255,165,255),(255,0,0)"
+    },
+    "zone": [
+        {
+            "name": "frt",
+            "zoneColor": "#FF0000",
+            "startTime": "11/10/2021 00:00:00 GMT+08:00",
+            "endTime": "11/10/2021 23:59:59 GMT+08:00",
+            "engines": "facial-recognition-office-1",
+            "activeDays": [
+                "mon",
+                "tue",
+                "wed",
+                "thu",
+                "fri",
+                "sat",
+                "sun"
+            ],
+            "width": 1223,
+            "height": 688,
+            "updated_by": "tmsp",
+            "timestamp": "2021-11-10T10:19:14.188Z",
+            "polygon": [],
+            "square": {
+                "x": 440.46868896484375,
+                "y": 149.0242919921875,
+                "width": 432,
+                "height": 393
+            },
+            "id": "10_11_2021_18_19_32_[tmsp]"
+        },
+        {
+            "name": "construction_sitea",
+            "zoneColor": "#FF0000",
+            "startTime": "11/17/2021 00:00:00 GMT+08:00",
+            "endTime": "11/17/2021 23:59:59 GMT+08:00",
+            "engines": "dump-truck-countinga",
+            "activeDays": [
+                "mon",
+                "tue",
+                "wed",
+                "thu",
+                "fri",
+                "sat"
+            ],
+            "width": 1223,
+            "height": 688,
+            "updated_by": "tmsp",
+            "timestamp": "2021-11-17T11:32:36.146Z",
+            "square": [],
+            "polygon": [
+                {
+                    "x": 12.46868896484375,
+                    "y": 11.80902099609375
+                },
+                {
+                    "x": 12.46868896484375,
+                    "y": 11.80902099609375
+                },
+                {
+                    "x": 3.46868896484375,
+                    "y": 681.8090209960938
+                },
+                {
+                    "x": 3.46868896484375,
+                    "y": 662.9201354980469
+                },
+                {
+                    "x": 847.4686889648438,
+                    "y": 675.9201354980469
+                },
+                {
+                    "x": 847.4686889648438,
+                    "y": 675.9201354980469
+                },
+                {
+                    "x": 731.4686889648438,
+                    "y": 517.9201354980469
+                },
+                {
+                    "x": 731.4686889648438,
+                    "y": 517.9201354980469
+                },
+                {
+                    "x": 624.4686889648438,
+                    "y": 232.92013549804688
+                },
+                {
+                    "x": 623.4686889648438,
+                    "y": 231.92013549804688
+                },
+                {
+                    "x": 494.46868896484375,
+                    "y": 7.920135498046875
+                },
+                {
+                    "x": 494.46868896484375,
+                    "y": 7.920135498046875
+                }
+            ],
+            "id": "17_11_2021_19_33_13_[tmsp]"
+        },
+        {
+            "name": "exit_zone",
+            "zoneColor": "#FF0000",
+            "startTime": "11/17/2021 00:00:00 GMT+08:00",
+            "endTime": "11/17/2021 23:59:59 GMT+08:00",
+            "engines": "dump-truck-counting",
+            "activeDays": [
+                "mon",
+                "tue",
+                "wed",
+                "thu",
+                "fri",
+                "sat"
+            ],
+            "width": 1223,
+            "height": 688,
+            "updated_by": "tmsp",
+            "timestamp": "2021-11-17T11:33:16.699Z",
+            "polygon": [
+                {
+                    "x": 682.4686889648438,
+                    "y": 367.1492919921875
+                },
+                {
+                    "x": 682.4686889648438,
+                    "y": 357.1492919921875
+                },
+                {
+                    "x": 795.4686889648438,
+                    "y": 619.3715209960938
+                },
+                {
+                    "x": 795.4686889648438,
+                    "y": 619.3715209960938
+                },
+                {
+                    "x": 1074.4686889648438,
+                    "y": 403.37152099609375
+                },
+                {
+                    "x": 1074.4686889648438,
+                    "y": 403.37152099609375
+                },
+                {
+                    "x": 1010.4686889648438,
+                    "y": 271.37152099609375
+                },
+                {
+                    "x": 1010.4686889648438,
+                    "y": 271.37152099609375
+                }
+            ],
+            "id": "17_11_2021_19_33_35_[tmsp]"
+        }
+    ],
+    "rule": [],
+    "id": "omni-cam00",
+    "company_code": "PRS",
+    "name": "omni-cam00",
+    "seq_no_format": "",
+    "connection_uri": "a",
+    "rtmp_uri": null,
+    "type": "normal",
+    "location": null,
+    "snapshot": "https://viact-deployment-others.s3.ap-east-1.amazonaws.com/event/production/device/omni-cam00/2023-04-26/aaa_v02-cam00_aaa_v02_48-b0-2d-15-e2-3f_1682487539.6795883.jpg",
+    "snapshot_created_at": "2023-04-26T08:27:23.000Z",
+    "created_at": "2021-01-08T09:07:00.000Z",
+    "updated_at": "2023-04-26T08:27:23.000Z",
+    "color": null
+}
